@@ -1,0 +1,6 @@
+#ifndef MODERN_CAMERA_H
+#define MODERN_CAMERA_H
+
+#define MODERN_ORBIT_CAM_STATE 0x15
+
+#endif // MODERN_CAMERA_H

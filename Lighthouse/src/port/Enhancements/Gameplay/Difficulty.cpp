@@ -1,0 +1,60 @@
+#include <libultraship/bridge.h>
+#include "port/UI/cvar_prefixes.h"
+#include "port/Enhancements/Events/Hooks/Events.h"
+#include "port/ShipInit.hpp"
+#include "port/Romhack/RomhackConfig.h"
+
+extern "C" {
+#include "enums.h"
+#include "functions.h"
+}
+
+static bool sSaveErased = false;
+
+void RegisterDifficulty_Init() {
+    // Permadeath, ignore lives and game over with file erase
+    COND_HOOK(OnPlayerDeath, EVENT_PRIORITY_NORMAL, CVarGetInteger(CVAR_ENHANCEMENT("Gameplay.Permadeath"), 0),
+              [](IEvent* event) {
+                  if (port_isRomhack()) {
+                      return;
+                  }
+                  item_adjustByDiffWithoutHud(ITEM_16_LIFE, -item_getCount(ITEM_16_LIFE));
+
+                  s32 gamenum = gameSelect_getGameNumber();
+                  if (gamenum == -1) {
+                      return;
+                  }
+
+                  gameFile_clear(gamenum);
+                  gameFile_8033CFD4(gamenum);
+                  sSaveErased = true;
+              });
+
+    COND_HOOK(OnGameLoad, EVENT_PRIORITY_NORMAL, true, [](IEvent* event) { sSaveErased = false; });
+
+    // Permadeath erases the save on death, and the game over path saves on its way back. Registered whatever the
+    // setting, so turning it off after a death doesn't write the live game over the erased slot.
+    COND_VB_SHOULD(VB_SAVE_AND_EXIT, EVENT_PRIORITY_NORMAL, true, {
+        if (sSaveErased) {
+            *should = false;
+        }
+    });
+}
+
+static RegisterShipInitFunc initFunc(RegisterDifficulty_Init, { CVAR_ENHANCEMENT("Gameplay.Permadeath") });
+
+#define CVAR_DAMAGE_SCALE CVAR_ENHANCEMENT("Gameplay.DamageScale")
+
+void RegisterDamageScale_Init() {
+    COND_VB_SHOULD(VB_ITEM_ADJUST_BY_DIFF, EVENT_PRIORITY_NORMAL, CVarGetInteger(CVAR_DAMAGE_SCALE, 1) > 1, {
+        const s32 item = va_arg(args, s32);
+        s32* diff = va_arg(args, s32*);
+        if (item == ITEM_14_HEALTH && *diff < 0) {
+            const int scale = CVarGetInteger(CVAR_DAMAGE_SCALE, 1);
+            // 4 is One-Hit.
+            *diff = scale >= 4 ? -9999 : *diff * scale;
+        }
+    });
+}
+
+static RegisterShipInitFunc damageScaleInitFunc(RegisterDamageScale_Init, { CVAR_DAMAGE_SCALE });

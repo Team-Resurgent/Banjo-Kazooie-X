@@ -1,0 +1,97 @@
+#pragma once
+
+#include <libultraship/bridge/eventsbridge.h>
+
+DEFINE_EVENT(SetAnimSpeedMult, int32_t* mult; int32_t id;)
+DEFINE_EVENT(OnActorUpdate, Actor* actor;)
+DEFINE_EVENT(OnActorDestroy, Actor* actor;)
+DEFINE_EVENT(OnActorArrayFree)
+DEFINE_EVENT(OnMapFileLoad, int32_t map;)
+DEFINE_EVENT(OnPlayerDeath)
+// GameFixes' Boggy race reload at 0 lives. Cancelling it skips game_transitionToMapResettingLevel.
+DEFINE_EVENT(OnBoggyRaceReload, int32_t map; int32_t exit;)
+DEFINE_EVENT(OnGameFileErase, int32_t gamenum;)
+DEFINE_EVENT(OnGameSave, int32_t fileNum;)
+DEFINE_EVENT(OnGameLoad, int32_t fileNum;)
+DEFINE_EVENT(OnGameErase, int32_t gameNum;)
+// flagSpace = AnchorFlagSpace; length = 1 for single sets, bit count for setN.
+DEFINE_EVENT(OnGameFlagSet, int32_t flagSpace; int32_t index; int32_t value; int32_t length;)
+// count is the resulting absolute value; diff is the change applied, after clamping.
+DEFINE_EVENT(OnItemCountChanged, int32_t item; int32_t count; int32_t diff;)
+// kind = AnchorCollectibleSpace.
+DEFINE_EVENT(OnCollectibleCollected, int32_t kind; int32_t id;)
+// prop = Prop*, an egg, feather or extra life picked up.
+DEFINE_EVENT(OnConsumableCollected, void* prop;)
+DEFINE_EVENT(OnNoteCollected, ActorMarker* marker;)
+// markerId = marker_e.
+DEFINE_EVENT(OnJinjoCollected, int32_t markerId;)
+// A carried object (an orange, gold bullion, present, caterpillar or acorn) going into the backpack.
+DEFINE_EVENT(OnCarriedObjectCollected, ActorMarker* marker;)
+// A carried actor leaving the player's hands; markerId = marker_e, start/target are f32[3].
+DEFINE_EVENT(OnCarryThrow, int32_t markerId; float* start; float* target;)
+// move = ability_e; value = 1 learned, 0 cleared.
+DEFINE_EVENT(OnAbilityLearned, int32_t move; int32_t value;)
+DEFINE_EVENT(OnJiggySpawned, int32_t jiggyId; float x; float y; float z;)
+DEFINE_EVENT(OnHoneycombDropSpawn, int32_t honeycombId; int32_t bundleId; float x; float y; float z;)
+DEFINE_EVENT(OnTimedJiggyExpired, int32_t jiggyId;)
+// A timed challenge started or reset its hourglass.
+DEFINE_EVENT(OnChallengeTimerSet, int32_t jiggyId;)
+DEFINE_EVENT(OnPropInit, Prop* propPtr;)
+DEFINE_EVENT(OnBottlesBonusComplete, int32_t index;)
+DEFINE_EVENT(OnSaveFileLoad, int32_t fileNum; void* saveBuffer; int32_t result;)
+DEFINE_EVENT(OnSaveFileSave, void* saveBuffer; int32_t fileNum; int32_t * result;)
+// The warp_* functions a romhack's config can send elsewhere.
+typedef enum WarpId {
+    WARP_ID_SM_EXIT_BANJOS_HOUSE = 1,
+    WARP_ID_LAIR_ENTER_LAIR_FROM_SM_LEVEL = 3,
+} WarpId;
+
+// nodeProp = NodeProp*.
+DEFINE_EVENT(OnWarpDispatch, void* nodeProp; int32_t warpIndex;)
+DEFINE_EVENT(OnNamedWarp, void* nodeProp; int32_t warpId;)
+DEFINE_EVENT(OnWarpMusic, int32_t dest;)
+DEFINE_EVENT(OnMapChangeRequest, int32_t* map; int32_t * exit;)
+DEFINE_EVENT(OnMapTransitionIn, int32_t map; int32_t * index;)
+DEFINE_EVENT(OnMapTransitionOut, int32_t from; int32_t to; int32_t * index;)
+// overlay = enum overlay_e, the one spawnQueue_reset just registered actors for.
+DEFINE_EVENT(OnSpawnableActorsReset, int32_t overlay;)
+// The most of an item the player can carry, by the cheato flags.
+DEFINE_EVENT(OnItemMax, int32_t item; int32_t * max;)
+// A level's total of notes (ITEM_C_NOTE), jiggies (ITEM_E_JIGGY) or honeycombs (ITEM_13_EMPTY_HONEYCOMB).
+DEFINE_EVENT(OnLevelItemMax, int32_t item; int32_t level; int32_t * max;)
+// A level's collected jiggies or honeycombs.
+DEFINE_EVENT(OnJiggyScoreLevelTotal, int32_t level; int32_t result;)
+DEFINE_EVENT(OnHoneycombScoreLevelTotal, int32_t level; int32_t result;)
+DEFINE_EVENT(OnTransformationCost, int32_t transformation; int32_t result;)
+DEFINE_EVENT(OnMumboWishwashyId, int32_t* id;)
+// Before actor_new builds the actor, while its info and flags can still change.
+DEFINE_EVENT(OnActorNew, ActorInfo* info; uint32_t * flags;)
+// sfx = SFX_46_KAZOOIE_CHOKING_UP or SFX_57_KAZOOIE_HEGH from Kazooie's head, SFX_3E_POOP_NOISE from her rear.
+DEFINE_EVENT(OnEggFireSfx, int32_t sfx; int32_t * rate;)
+// sfx = SFX_3F5_UNKNOWN, as Napper wakes.
+DEFINE_EVENT(OnNapperWakeSfx, int32_t* sfx;)
+DEFINE_EVENT(OnCrocMaxWalkVelocity, float* velocity;)
+// count = the jiggies a level holds before its last, 9 in vanilla.
+DEFINE_EVENT(OnLastJiggyCount, int32_t* count;)
+// scale = f32[3], before the prop's sprite draws.
+DEFINE_EVENT(OnPropSpriteScale, int32_t sprite; float* scale;)
+DEFINE_EVENT(OnNewGame)
+DEFINE_EVENT(OnDefaultBootMap, int32_t* map;)
+// The map a game over, its skipped cutscene, or Save & Quit goes to.
+DEFINE_EVENT(OnGameOverReturnMap, int32_t* map;)
+// result = MapSkyInfo* or MapModelDescription* for the first two.
+DEFINE_EVENT(OnGetMapSkyInfo, int32_t map; void* result;)
+DEFINE_EVENT(OnGetMapModelDescription, int32_t map; void* result;)
+DEFINE_EVENT(OnGetMapMusicTrack, int32_t map; bool secondary; int32_t result;)
+DEFINE_EVENT(OnGetMapLevel, int32_t map; int32_t result;)
+// The file-select commit, for both new game and continue. Unlike OnGameLoad this
+// does not fire for the zoombox preview.
+DEFINE_EVENT(OnGameStart)
+DEFINE_EVENT(EggHeadSpawn, float* pitch; float* spawnHeight; float* minVerticalVelocity; float* yawBias;
+             int32_t * flattenTrajectory;)
+
+DEFINE_EVENT(OnLevelReset, int32_t levelId;)
+
+DEFINE_EVENT(OnGetLevelSpecificFlag, int32_t flagId; int32_t result;)
+
+DEFINE_EVENT(OnCheckSpiralMountainAbilities, int32_t result;)

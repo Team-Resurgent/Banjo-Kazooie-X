@@ -1,0 +1,100 @@
+#include "MiscBehavior.h"
+#include <libultraship/bridge/consolevariablebridge.h>
+#include <spdlog/spdlog.h>
+#include "ship/Context.h"
+#include "port/Enhancements/Events/Hooks/Events.h"
+#include "port/UI/Notification.h"
+
+#include "port/Save/Types.h"
+
+#include "port/Rando/Logic/Logic.h"
+#include "port/Rando/Spoiler/Spoiler.h"
+
+static bool sSeedGenerationFailed = false;
+
+static void RefuseSeed(const char* message) {
+    sSeedGenerationFailed = true;
+    Notification::Emit({
+        .prefix = "Seed Failure:",
+        .prefixColor = ImVec4(1.0f, 0.2f, 0.2f, 1.0f),
+        .message = message,
+    });
+}
+
+void Rando::MiscBehavior::OnFileLoad() {
+    REGISTER_LISTENER(OnGameLoad, EVENT_PRIORITY_NORMAL, [](IEvent* event) {
+        OnGameLoad* ev = (OnGameLoad*)event;
+        selectedFileNum = ev->fileNum;
+        Rando::Logic::shuffledPool.clear();
+    });
+
+    REGISTER_LISTENER(OnSaveLoad, EVENT_PRIORITY_NORMAL, [](IEvent* event) {
+        OnSaveLoad* ev = (OnSaveLoad*)event;
+        SaveData* saveData = (SaveData*)ev->saveData;
+
+        Rando::Logic::shuffledPool.clear();
+
+        if (saveData->magic != 0) {
+            if (saveData->shipSaveData.fileType == FILE_TYPE_SAVE_RANDO) {
+                Rando::Logic::GeneratePoolFromSaveData(saveData);
+            }
+            return;
+        }
+
+        if (CVarGetInteger(CVAR_RANDOMIZER_SETTING("Enable"), 0) && !port_isRomhack()) {
+            Rando::Logic::InitializeSaveData(saveData);
+            std::string spoilerPath = CVarGetString(CVAR_RANDOMIZER_SETTING("SpoilerFile"), "");
+            if (CVarGetInteger(CVAR_RANDOMIZER_SETTING("UseExistingLog"), 0) && !spoilerPath.empty()) {
+                // std::string spoilerPath = CVarGetString(CVAR_RANDOMIZER_SETTING("SpoilerFile"), "");
+                bool loaded = false;
+                try {
+                    loaded = Rando::Spoiler::GenerateFromSpoiler(Rando::Spoiler::LoadFromFile(spoilerPath.c_str()));
+                } catch (const std::exception& e) {
+                    SPDLOG_ERROR("Spoiler log {} didn't load: {}", spoilerPath, e.what());
+                }
+                if (!loaded) {
+                    RefuseSeed("couldn't load the spoiler log.");
+                    return;
+                }
+            } else {
+                if (!Rando::Logic::GenerateShufflePool(saveData)) {
+                    RefuseSeed("couldn't place every item. Try again or change settings.");
+                    return;
+                }
+                Rando::Logic::GrantStartingLoadout();
+                Rando::Logic::GrantFileProgressFlags();
+                std::string spoilerName = std::to_string(saveData->shipSaveData.randoSaveData.seedId).c_str();
+                std::erase(spoilerName, '-');
+                spoilerName += ".json";
+                Rando::Spoiler::SaveToFile(spoilerName, Rando::Spoiler::GenerateFromPoolGeneration());
+            }
+
+            saveData->shipSaveData.fileType = FILE_TYPE_SAVE_RANDO;
+            saveData->shipSaveData.fileCreatedAt = GetUnixTimestamp();
+        }
+    });
+
+    // Refuse a new file whose seed failed to generate.
+    REGISTER_VB_SHOULD(VB_GAMESELECT_START_GAME, EVENT_PRIORITY_NORMAL, {
+        if (sSeedGenerationFailed) {
+            Actor* actor = va_arg(args, Actor*);
+            s32 gameNumber = va_arg(args, s32);
+            sSeedGenerationFailed = false;
+            coMusicPlayer_playMusic(COMUSIC_2C_BUZZER, 22000);
+            if (gameNumber == 0) { // CH_GAME_SELECT_SAVEFILE_0_BED
+                func_802C75A0(actor, 1);
+            }
+            subaddie_set_state(actor, 1);
+            actor_loopAnimation(actor);
+            *should = false;
+        }
+    });
+
+    REGISTER_LISTENER(OnGameStart, EVENT_PRIORITY_NORMAL, [](IEvent* event) { CALL_EVENT(InitRandoEvents); });
+
+    REGISTER_LISTENER(OnLoadFileSelect, EVENT_PRIORITY_NORMAL, [](IEvent* event) {
+        OnLoadFileSelect* ev = (OnLoadFileSelect*)event;
+
+        selectedFileNum = DEFAULT_FILE_NUM;
+    });
+}
