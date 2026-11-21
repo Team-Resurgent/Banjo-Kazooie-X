@@ -432,7 +432,16 @@ bool audioManager_handleFrameMsg(AudioInfo *info, AudioInfo *prev_info){
         info->frame_samples = sMinFrameSize;
     }
 
+#ifdef LUS_XBOX
+    {
+        // Banjo-Kazooie-X: the synthesis, timed for the log's tick line (FramePacing.cpp)
+        unsigned long long xbStart = __builtin_ia32_rdtsc();
+        command_list_end = n_alAudioFrame(audioManager.ACMDList[sCmdBufferIndex], &command_list_len, outbuffer, info->frame_samples);
+        port_xboxCost(2, __builtin_ia32_rdtsc() - xbStart);
+    }
+#else
     command_list_end = n_alAudioFrame(audioManager.ACMDList[sCmdBufferIndex], &command_list_len, outbuffer, info->frame_samples);
+#endif
 
 #if VERSION == VERSION_USA_1_0
     if (sNumAudioCmdsPerFrame < command_list_len) {

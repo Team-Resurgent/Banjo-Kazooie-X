@@ -514,7 +514,7 @@ struct WarpEntry {
 };
 
 // clang-format off
-// Warps.cpp's warpsInfo, unchanged
+// Warps.cpp's warpsInfo, unchanged, and the 100% ending at the end
 static const WarpEntry kWarps[] = {
     // LEVEL_1_MUMBOS_MOUNTAIN
     { MAP_2_MM_MUMBOS_MOUNTAIN, WARP_MM_1_MUMBOS_HUT,           "Outside Mumbo's Hut" },
@@ -833,6 +833,9 @@ static const WarpEntry kWarps[] = {
     { MAP_8C_SM_BANJOS_HOUSE,   WARP_SM_BANJOS_HOUSE_2_BOTTLES,           "SM Banjo's House - Bottles" },
     // LEVEL_C_BOSS
     { MAP_90_GL_BATTLEMENTS, WARP_GL_BOSS_1_ENTRANCE, "GL Battlements - Entrance" },
+    // LEVEL_D_CUTSCENE (not in Warps.cpp): the 100% ending, as the game's own goes there after Grunty (cutscene_skip.c),
+    // so Mumbo's pictures can be tested without the fight
+    { MAP_95_CS_END_ALL_100, 1, "100% ending" },
 };
 // clang-format on
 

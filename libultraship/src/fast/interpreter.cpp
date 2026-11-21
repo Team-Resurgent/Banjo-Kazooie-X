@@ -315,6 +315,17 @@ struct XboxTextureSlot {
 };
 static XboxTextureSlot sXboxTextureSlots[1024];
 
+// G_SETTIMG naming its texture by a path string ("__OTR__...", Banjo-Kazooie's models: every texture and palette), by
+// the string's address: ~1000 a Click Clock Wood frame at 2 us each (the image signature read, the resolve map with
+// its strcmp, the shared_ptr copied five times over). The path is kept and compared, as the map does: a string freed
+// and another made at its address takes the long way. Emptied with the texture cache (TextureCacheClear).
+struct XboxPathSlot {
+    const char* key;
+    std::string path;
+    std::shared_ptr<Fast::Texture> texture;
+};
+static XboxPathSlot sXboxPathSlots[1024];
+
 // The textures uploaded with a mask (XboxMaskNextUpload), as (mask, texture) addresses: the game changes a mask's
 // bytes and invalidates the mask (Majora's Wrath dissolving, the Carnivorous Lily), so the texture made with it goes too
 static std::vector<std::pair<const uint8_t*, const uint8_t*>> sXboxMaskedUploads;
@@ -1555,6 +1566,10 @@ void Interpreter::TextureCacheClear() {
         slot.hash = 0;
         slot.texture.reset();
     }
+    for (XboxPathSlot& slot : sXboxPathSlots) {
+        slot.key = nullptr;
+        slot.texture.reset();
+    }
 #endif
 }
 
@@ -2656,7 +2671,12 @@ void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
         auto fbIt = mFbTextures.find((uintptr_t)origAddr);
         if (fbIt != mFbTextures.end()) {
             Flush();
+#ifdef LUS_XBOX
+            // (onto its own sampler: Banjo-Kazooie's air bubbles have the frame as TEXEL1)
+            mRapi->SelectTextureFbAt(i, fbIt->second);
+#else
             mRapi->SelectTextureFb(fbIt->second);
+#endif
             mRdp->textures_changed[i] = false;
             return;
         }
@@ -5289,6 +5309,12 @@ void Interpreter::GfxDpFillRectangle(int32_t ulx, int32_t uly, int32_t lrx, int3
         bool isFullScreen = (ulx <= 0 && uly <= 0 && lrx >= (int32_t)(mNativeDimensions.width - 1) * 4 &&
                              lry >= (int32_t)(mNativeDimensions.height - 1) * 4);
         if (isFullScreen) {
+#ifdef LUS_XBOX
+            // not always redundant: a clear in the middle of the frame is for what's drawn after it (Banjo-Kazooie's
+            // ending draws the beach, clears, then Mumbo's hand with the photo). The whole target's depth, widescreen too
+            Flush();
+            mRapi->ClearFramebuffer(false, true);
+#endif
             return;
         }
 
@@ -6337,6 +6363,18 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
     F3DGfx* cmd = *cmd0;
     uintptr_t i = (uintptr_t)gfx->SegAddr(cmd->words.w1);
 
+#ifdef LUS_XBOX
+    XboxPathSlot* pathSlot = nullptr;
+    if ((i & 1) == 0 && i != 0) {
+        pathSlot = &sXboxPathSlots[((uint32_t)i >> 2) * 2654435761u >> 22];
+        if (pathSlot->key == (const char*)i && pathSlot->texture != nullptr &&
+            strcmp(pathSlot->path.c_str(), (const char*)i) == 0) {
+            gfx->GfxDpSetTextureImage(C0(19, 2), C0(0, 12) + 1, pathSlot->texture);
+            return false;
+        }
+    }
+#endif
+
     char* imgData = (char*)i;
     uint32_t texFlags = 0;
     RawTexMetadata rawTexMetdata = {};
@@ -6356,6 +6394,13 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
             }
 
             i = (uintptr_t)reinterpret_cast<char*>(tex->ImageData);
+#ifdef LUS_XBOX
+            if (pathSlot != nullptr && IsValidResolvedAddress(i)) {
+                pathSlot->key = imgData;
+                pathSlot->path = imgData;
+                pathSlot->texture = tex;
+            }
+#endif
             texFlags = tex->Flags;
             rawTexMetdata.width = tex->Width;
             rawTexMetdata.height = tex->Height;

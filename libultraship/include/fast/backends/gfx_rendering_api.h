@@ -147,6 +147,10 @@ class GfxRenderingAPI {
     /** @brief The next CopyFramebuffer is the game's "once a frame": a tick's, not each of its replays'. */
     virtual void NextCopyOnceATick(bool once) {
     }
+    /** @brief SelectTextureFb onto a given sampler: a 2-cycle combiner's TEXEL1 is the second. */
+    virtual void SelectTextureFbAt(int slot, int fbId) {
+        SelectTextureFb(fbId);
+    }
     /** @brief The next UploadTexture's texels left transparent where `mask` (width x height, a byte a texel) isn't 0:
      *  a blended texture with no replacement, for a backend without mask stages. nullptr: none. */
     virtual void NextUploadMask(const uint8_t* mask, uint32_t width, uint32_t height) {

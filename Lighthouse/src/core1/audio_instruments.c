@@ -292,6 +292,24 @@ void musicTrack_release(enum comusic_e track_id) {
     AudioSync_Unlock();
 }
 
+#ifdef LUS_XBOX
+// Banjo-Kazooie-X: whether a slot's sequence is on this data. A slot keeps its sequence after the game lets go of the
+// track (musicTrack_release goes by track_id, which a stop clears at once) and can play it again (func_8024FF34
+// resumes a paused slot); on the N64 the released track stayed readable, here it's unloaded at the next map change
+// (ResourceMgr_XboxFreeUnused), so the music thread read freed memory and crashed. Data a slot is on is kept until
+// the slot takes another track. (Called on the game's thread, the only one that sets a slot's sequence.)
+int musicSlot_xboxUsesData(const void *data) {
+    int i;
+
+    for (i = 0; i < NUM_MUSIC_SLOTS; i++) {
+        if (data != NULL && (const void *)sMusicSlots[i].cseq.base == data) {
+            return 1;
+        }
+    }
+    return 0;
+}
+#endif
+
 void musicTrack_releaseAll(void) {
     int i;
 

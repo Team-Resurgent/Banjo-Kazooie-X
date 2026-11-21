@@ -410,6 +410,15 @@ int gctransition_active(void){
     return s_current_transition.state != TRANSITION_STATE_0_NONE;
 }
 
+#ifdef LUS_XBOX
+// Banjo-Kazooie-X: the falling jiggy pieces are playing, their picture held in the transition's framebuffer
+// (the air bubbles' copy of the frame goes there too: FramebufferPatches.cpp)
+int gctransition_xboxFallingPieces(void){
+    return s_current_transition.state != TRANSITION_STATE_0_NONE && s_current_transition.transistion_info != NULL
+        && s_current_transition.transistion_info->model_index == ASSET_467_MODEL_TRANSITION_FALLING_JIGGIES;
+}
+#endif
+
 int gctransition_8030BDC0(void){
     return ( s_current_transition.state == TRANSITION_STATE_3_BLACK_OUT)
     || (( s_current_transition.state == TRANSITION_STATE_1_LOADING) && (s_current_transition.unk0 < 2))

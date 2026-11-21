@@ -12,6 +12,10 @@ extern void Framebuffer_ReadbackGPU(int bufferIndex);
 #include "port/Patches/Patches.h"
 #ifdef LUS_XBOX
 #include "port/ResourceHelpers.h"
+#ifdef LUS_XBOX
+#include <stdio.h>
+#include "lusx_debug.h"
+#endif
 #endif
 
 extern void print_updateBoldLetterFontDelayedFreeing(void);
@@ -191,6 +195,12 @@ void func_802E39D0(Gfx **gfx, Mtx **mtx, Vtx **vtx, s32 framebuffer_idx, bool ar
         if (TransitionPatches_ShouldCapture()) {
             Framebuffer_CaptureTransition(gfx);
         }
+#ifdef LUS_XBOX
+        // Banjo-Kazooie-X: and for the air bubbles, which show the frame through them (FramebufferPatches.cpp)
+        else if (Framebuffer_ConsumeBubbleCopy()) {
+            Framebuffer_CaptureTransition(gfx);
+        }
+#endif
         gctransition_draw(gfx, mtx, vtx);
     }
     // [port] Populate gFramebuffers from the GPU via gDPReadFB at native resolution.
@@ -298,6 +308,14 @@ void game_changeMap(enum game_mode_e mode){
     s32 prev_mode;
     s32 prev_map;
     s32 outgoing_mode = sGameState.game_mode; // [port] game_setMode below overwrites it
+#ifdef LUS_XBOX
+    // Banjo-Kazooie-X: each map change in the black box (and the log on disk up to it), so a console that locks up
+    // says which change it was in, and whether its load finished
+    char xbMark[64];
+    snprintf(xbMark, sizeof(xbMark), "map 0x%X > 0x%X exit %d mode %d", (int)gsworld_getMap(),
+             (int)sGameState.map, (int)sGameState.exit, (int)mode);
+    LusxDebug_Mark(xbMark);
+#endif
 
     core1_15B30_sendMesg3ToRenderThread();
     sp34 = sGameState.reset_level;
@@ -325,6 +343,8 @@ void game_changeMap(enum game_mode_e mode){
 #ifdef LUS_XBOX
     // Banjo-Kazooie-X: the last map's assets the game no longer holds unloaded (a 64 MB Xbox can't keep them all)
     ResourceMgr_XboxFreeUnused();
+    snprintf(xbMark, sizeof(xbMark), "loaded map 0x%X", (int)map);
+    LusxDebug_Mark(xbMark);
 #endif
 }
 
@@ -353,7 +373,16 @@ void game_draw(bool arg0) {
     mtx_start = mtx;
     vtx_start = vtx;
 
+#ifdef LUS_XBOX
+    {
+        // Banjo-Kazooie-X: the game making its display list, timed for the log's tick line (FramePacing.cpp)
+        unsigned long long xbStart = __builtin_ia32_rdtsc();
+        func_802E39D0(&gfx, &mtx, &vtx, getActiveFramebuffer(), arg0);
+        port_xboxCost(1, __builtin_ia32_rdtsc() - xbStart);
+    }
+#else
     func_802E39D0(&gfx, &mtx, &vtx, getActiveFramebuffer(), arg0);
+#endif
 
     // [port] Frame submission gate
     if (!EventSystem_Should(VB_PICTUREBOX_SUBMIT_FRAME, true, (s32)(gfx - gfx_start))) {

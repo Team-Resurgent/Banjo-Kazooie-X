@@ -1584,6 +1584,7 @@ void GfxRenderingAPID3D8::Init() {
     if (mDev == nullptr) {
         return;
     }
+    mDev->GetDepthStencilSurface(&mScreenDepth); // (the device's own, kept for the run)
     mDev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
     mDev->SetRenderState(D3DRS_LIGHTING, FALSE);
     mDev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
@@ -1720,7 +1721,15 @@ D3DSurface* GfxRenderingAPID3D8::TargetColor(int fbId) {
 D3DSurface* GfxRenderingAPID3D8::TargetDepth(int fbId) {
     D3DSurface* s = nullptr;
     if (fbId == 0) {
-        mDev->GetDepthStencilSurface(&s);
+        // the screen's own, not the one bound now: after a framebuffer drawn with its own depth buffer (Banjo-Kazooie's
+        // picture, 320x256) that one was still bound, and the whole screen was drawn against it, past its end: a GPU
+        // that writes past a buffer locks the console up (Mumbo's pictures at the 100% ending; xemu asserts on it)
+        s = mScreenDepth;
+        if (s) {
+            s->AddRef();
+        } else {
+            mDev->GetDepthStencilSurface(&s);
+        }
         return s;
     }
     s = mFramebuffers[fbId].depth;
@@ -2025,11 +2034,15 @@ void* GfxRenderingAPID3D8::GetFramebufferTextureId(int fbId) {
 }
 
 void GfxRenderingAPID3D8::SelectTextureFb(int fbId) {
+    SelectTextureFbAt(0, fbId);
+}
+
+void GfxRenderingAPID3D8::SelectTextureFbAt(int slot, int fbId) {
     if (fbId <= 0 || fbId >= (int)mFramebuffers.size()) {
         return;
     }
     EnsureFramebuffer(fbId);
-    SelectTexture(0, mFramebuffers[fbId].texId);
+    SelectTexture(slot, mFramebuffers[fbId].texId);
 }
 
 void GfxRenderingAPID3D8::DeleteTexture(uint32_t texId) {

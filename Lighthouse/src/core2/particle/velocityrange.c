@@ -98,6 +98,18 @@ void func_802F1FC0(Struct65s *self, Gfx **gfx, Mtx **mtx, Vtx **vtx) {
     
     gSPDisplayList((*gfx)++, D_80368AC0);
     func_80347FC0(gfx, D_80368AB0[1].unk0, 0, 0, 0, 0, 0, 0, 0, &width, &height);
+#ifdef LUS_XBOX
+    // Banjo-Kazooie-X: the frame from a GPU copy, not a readback (FramebufferPatches.cpp). The 32x32 texels the
+    // N64's tile showed: from column (spC4 & ~3) + 3 - spC4 % 4 and row spC0. Both tiles take the same texcoords,
+    // so the mask's tile starts at that corner too, or it misses the frame's piece and leaves the square showing.
+    s32 xbS, xbT;
+    s32 xbGpu = Framebuffer_LoadBubbleFrame(gfx, (spC4 & 0xFFFC) + 3 - (spC4 % 4), spC0, &xbS, &xbT);
+    if (xbGpu) {
+        gDPSetTileSize((*gfx)++, 0, xbS << G_TEXTURE_IMAGE_FRAC, xbT << G_TEXTURE_IMAGE_FRAC,
+                       (xbS + width - 1) << G_TEXTURE_IMAGE_FRAC, (xbT + height - 1) << G_TEXTURE_IMAGE_FRAC);
+    } else
+#endif
+    {
     Framebuffer_RequestReadback(); // [port] particle reads framebuffer pixels
     temp_addr = &gFramebuffers[getOtherFramebuffer()][spC0*gFramebufferWidth + (spC4 & 0xFFFC)];
     gDPSetTextureImage((*gfx)++, G_IM_FMT_RGBA, G_IM_SIZ_16b, gFramebufferWidth, temp_addr);
@@ -107,6 +119,7 @@ void func_802F1FC0(Struct65s *self, Gfx **gfx, Mtx **mtx, Vtx **vtx) {
     gDPPipeSync((*gfx)++);
     gDPSetTile((*gfx)++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 9, 0x0080, 1, 0, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOLOD);
     gDPSetTileSize((*gfx)++, 1, ((3 - (spC4 % 4)) + 1 - 1)<< 2, 0, (((3 - (spC4 % 4)) + 0x20) - 1)<<2, 0x007C);
+    }
     gSPVertex((*gfx)++, (uintptr_t)*vtx, 8, 0);
     gSP1Quadrangle((*gfx)++, 0, 1, 3, 2, 0);
     func_80349AD0();
@@ -126,6 +139,12 @@ void func_802F1FC0(Struct65s *self, Gfx **gfx, Mtx **mtx, Vtx **vtx) {
             (*vtx)->n.ob[2] = 0;
             (*vtx)->n.tc[0] = (spC4*0x1F) << 6;
             (*vtx)->n.tc[1] = (spC0*0x1F) << 6;
+#ifdef LUS_XBOX
+            if (xbGpu) {
+                (*vtx)->n.tc[0] = (xbS + spC4 * 0x1F) << 6;
+                (*vtx)->n.tc[1] = (xbT + spC0 * 0x1F) << 6;
+            }
+#endif
             (*vtx)->n.n[0] = 0xB4;
             (*vtx)->n.n[1] = 0xF0;
             (*vtx)->n.n[2] = 0xFF;

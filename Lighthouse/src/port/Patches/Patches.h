@@ -51,6 +51,13 @@ void Framebuffer_PatchPictureModel(void* model_bin, int32_t min_xy, int32_t max_
                                    uint32_t from);
 int32_t port_getTransitionGpuFbId(void);
 void Framebuffer_CaptureTransition(void* gfx_ptr);
+#ifdef LUS_XBOX
+int Framebuffer_LoadBubbleFrame(void* gfx_ptr, int32_t x, int32_t y, int32_t* s, int32_t* t);
+int Framebuffer_ConsumeBubbleCopy(void);
+/* Banjo-Kazooie-X: a part of a tick's work, in CPU cycles, for the log's tick line (FramePacing.cpp): 0 the game's
+   logic, 1 the game making its display list, 2 the audio's synthesis */
+void port_xboxCost(int which, unsigned long long cycles);
+#endif
 void Framebuffer_PatchTransitionModel(void* model_bin);
 
 // Sprite Display Cache (SpritePatches.cpp)

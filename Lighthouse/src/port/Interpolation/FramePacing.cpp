@@ -1,6 +1,7 @@
 #include "port/Engine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -125,6 +126,57 @@ int MsOf(long long ns) {
 // isn't run again for them, as Lighthouse's own timed pass does on a PC, where the CPU can afford it.
 static MtxBlends sXboxBlended;
 
+// Banjo-Kazooie-X: where a tick's CPU goes, a line in the log each 100 ticks drawn: the game's logic, the game making
+// its display list, the audio's synthesis (port_xboxCost, from the game's and the audio's threads), and this thread's
+// run of the list and replays. All on one CPU: together they're what has to fit in a tick (33 ms at 30 a second). A
+// map's load (a tick's logic over 100 ms) is counted apart, not in the averages.
+extern "C" double gLusxCyclesPerMs; // xbox_main.cpp
+static std::atomic<uint64_t> sXboxCost[3];
+static std::atomic<uint32_t> sXboxLogicTicks, sXboxLoads;
+static std::atomic<uint64_t> sXboxLogicLongest;
+
+extern "C" void port_xboxCost(int which, unsigned long long cycles) {
+    if (which < 0 || which > 2) {
+        return;
+    }
+    if (which == 0) {
+        if (cycles > (uint64_t)(gLusxCyclesPerMs * 100.0)) {
+            sXboxLoads++;
+            return;
+        }
+        sXboxLogicTicks++;
+        uint64_t longest = sXboxLogicLongest.load();
+        while (cycles > longest && !sXboxLogicLongest.compare_exchange_weak(longest, cycles)) {
+        }
+    }
+    sXboxCost[which] += cycles;
+}
+
+static void XboxLogTickCosts(long long listNs, long long drawNs, int frames) {
+    static long long sListNs, sDrawNs;
+    static uint32_t sTicks, sFrames;
+    sListNs += listNs;
+    sDrawNs += drawNs;
+    sFrames += frames;
+    if (++sTicks < 100) {
+        return;
+    }
+    const double perMs = gLusxCyclesPerMs > 0.0 ? gLusxCyclesPerMs : 733333.0;
+    const uint32_t logicTicks = sXboxLogicTicks.exchange(0);
+    const double n = logicTicks != 0 ? (double)logicTicks : 1.0;
+    const double logic = (double)sXboxCost[0].exchange(0) / perMs / n;
+    const double build = (double)sXboxCost[1].exchange(0) / perMs / n;
+    const double audio = (double)sXboxCost[2].exchange(0) / perMs / sTicks; // (its frames aren't the ticks)
+    const double list = (double)sListNs / 1e6 / sTicks, draw = (double)sDrawNs / 1e6 / sTicks;
+    SPDLOG_INFO("lus-x: a tick: the game's logic {:.1f} ms (the longest {:.1f}), its display list made {:.1f} ms, "
+                "audio {:.1f} ms; the list's run {:.1f} ms, {:.1f} frames replayed {:.1f} ms; together {:.1f} ms; "
+                "{} loads",
+                logic, (double)sXboxLogicLongest.exchange(0) / perMs, build, audio, list, (double)sFrames / sTicks,
+                draw, logic + build + audio + list + draw, sXboxLoads.exchange(0));
+    sListNs = sDrawNs = 0;
+    sTicks = sFrames = 0;
+}
+
 static void XboxDrawTick(Gfx* Commands, int frames) {
     auto wnd = std::dynamic_pointer_cast<Fast::Fast3dWindow>(Ship::Context::GetRawInstance()->GetWindow());
     if (wnd == nullptr) {
@@ -184,6 +236,9 @@ static void XboxDrawTick(Gfx* Commands, int frames) {
         }
         interpreter->mInterpolationT = 1.0f;
         LusxDebug_SetCosts(-1, -1, MsOf(listNs), MsOf(drawNs), sLastTickNs != 0 ? MsOf(tickNs - sLastTickNs) : 0);
+        if (!menu) {
+            XboxLogTickCosts(listNs, drawNs, frames);
+        }
         LusxDebug_SetNeed(MsOf(listNs + drawNs), 1000 / EffectiveLogicFps());
         sLastTickNs = tickNs;
         if (menu) {

@@ -343,15 +343,33 @@ void FrameInterpolation_RecordCloseChild(void) {
     }
 }
 
-uintptr_t FrameInterpolation_Hash3(uint64_t a, uint64_t b, uint64_t c) {
+static uint64_t Hash3Wide(uint64_t a, uint64_t b, uint64_t c) {
     uint64_t h = a * 0x9E3779B97F4A7C15ULL;
     h ^= b * 0x100000001b3ULL;
     h ^= c * 0xbf58476d1ce4e5b9ULL;
+    return h;
+}
+
+uintptr_t FrameInterpolation_Hash3(uint64_t a, uint64_t b, uint64_t c) {
+    uint64_t h = Hash3Wide(a, b, c);
+#ifdef LUS_XBOX
+    h ^= h >> 32; // (Banjo-Kazooie-X: a 32-bit uintptr_t keeps the low half only, where a prop's x never reaches)
+#endif
     return static_cast<uintptr_t>(h);
 }
 
+// Banjo-Kazooie-X: the whole 64-bit hash goes into the path. Cut to the Xbox's 32-bit uintptr_t it lost the prop's x
+// (props are hashed with x << 32), so eggs and notes in a row along x shared one scope, collided, and drew where the
+// tick put them while the camera between ticks turned: a second image of each when the camera turned.
 void FrameInterpolation_RecordOpenChildHash3(const char* key, uint64_t a, uint64_t b, uint64_t c) {
-    FrameInterpolation_RecordOpenChild(key, FrameInterpolation_Hash3(a, b, c));
+    if (!gRecording) {
+        return;
+    }
+    const uint64_t id = Hash3Wide(a, b, c);
+    uint64_t h = gRecord->scopeStack.back().pathHash;
+    h = fnvMix(h, reinterpret_cast<uintptr_t>(key));
+    h = fnvMix(h, id);
+    gRecord->scopeStack.push_back({ h, 0, 0, 0, 0, key, static_cast<uintptr_t>(id ^ (id >> 32)) });
 }
 
 void FrameInterpolation_RecordMatrixToMtx(void* dst, const float src[4][4]) {

@@ -458,6 +458,7 @@ void ResourceHelpers_ClearRefCache() {
 
 #ifdef LUS_XBOX
 extern "C" void SpritePatches_ForgetSprite(const void* sprite); // Patches/SpritePatches.cpp
+extern "C" int musicSlot_xboxUsesData(const void* data);       // core1/audio_instruments.c
 static std::atomic<int> sXboxTexturesStale{ 0 };
 
 // assetcache_release: one holder fewer. A pointer the cache didn't give out, or one already at none, changes nothing.
@@ -488,13 +489,14 @@ extern "C" void ResourceMgr_XboxFreeUnused(void) {
         const uint32_t id = it->first;
         auto uses = sAssetUses.find(id);
         const size_t bytes = it->second != nullptr ? it->second->GetPointerSize() : 0;
-        if (uses == sAssetUses.end() || uses->second > 0) {
+        const void* pointer = it->second != nullptr ? it->second->GetRawPointer() : nullptr;
+        // (a music track a slot's sequence is still on: the slot holds it, though the game's count doesn't say so)
+        if (uses == sAssetUses.end() || uses->second > 0 || musicSlot_xboxUsesData(pointer)) {
             kept++;
             keptBytes += bytes;
             ++it;
             continue;
         }
-        const void* pointer = it->second != nullptr ? it->second->GetRawPointer() : nullptr;
         SpritePatches_ForgetSprite(pointer);
         sAssetByPointer.erase(pointer);
         sAssetUses.erase(uses);

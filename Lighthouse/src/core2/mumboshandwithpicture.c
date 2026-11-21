@@ -65,7 +65,14 @@ Actor *chMumbosHandWithPicture_draw(ActorMarker *marker, Gfx **gfx, Mtx **mtx, V
     // On N64, depthbuffer_clear cleared the hardware depth buffer between the two draws
     // via CPU-accessible memory. On PC, the GBI depth fill may not translate to a
     // GPU depth clear, causing the hand to fail depth tests against the 3D scene.
+#ifdef LUS_XBOX
+    // Banjo-Kazooie-X: the beach behind the photo with its depth, as the N64 drew it (without, its polygons covered
+    // each other in the list's order: a square of the rock over the sky, the sand wrong); the renderer clears depth
+    // mid-frame (depthbuffer_clear below), so the hand still draws over it
+    modelRender_setDepthMode(MODEL_RENDER_DEPTH_FULL);
+#else
     modelRender_setDepthMode(MODEL_RENDER_DEPTH_NONE);
+#endif
     modelRender_draw(gfx, mtx, sp58, NULL, 1.0f, sp4C, D_8037DFE8);
     gDPSetColorDither((*gfx)++, G_CD_DISABLE);
     depthbuffer_clear(gfx);

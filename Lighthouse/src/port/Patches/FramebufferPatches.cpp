@@ -24,6 +24,9 @@ s32 getGameMode(void);
 // Mirror mode's state at the last capture (MirrorPatches.cpp)
 void MirrorPatches_MarkCapture(void);
 int MirrorPatches_ShouldFlipPauseBg(void);
+#ifdef LUS_XBOX
+int gctransition_xboxFallingPieces(void);
+#endif
 
 // During FADE_IN, the game disables scene drawing one frame before
 // capturing gFramebuffers. Without freezing, the readback would overwrite
@@ -339,6 +342,50 @@ void Framebuffer_CaptureTransition(Gfx** gfx) {
         gDPCopyFB((*gfx)++, trFb, 0, 0, NULL); // copy main FB -> transition FB
     }
 }
+
+#ifdef LUS_XBOX
+// Banjo-Kazooie-X: Gloop's air bubbles (core2/particle/velocityrange.c) show the last frame through them. The PC
+// port reads the whole frame back to the CPU each tick a bubble lives; on the Xbox that wait for the GPU and the
+// pixel-by-pixel read of the screen halved the frame rate, on screen or not. The bubble takes the frame from a GPU
+// copy instead: the transition's framebuffer (no more memory), the finished frame copied into it while a bubble is
+// drawn (gameloop.c), as the N64's bubble had the last frame's buffer.
+static int s_bubbleCopyTicks = 0;
+
+// Loads the copy onto tile 1 (TMEM 0x80, where the N64 loaded its piece of the frame) and gives the texel of it at
+// the N64 frame's (x, y). The copy is the whole screen; it's declared as many texels wide as the N64 frame's pixels
+// would be across the whole screen (in widescreen the 4:3 frame is its middle), so one texel is one N64 pixel: the
+// bubble's two tiles share their texcoords (the frame is TEXEL1, the round mask TEXEL0), and the mask's tile is
+// moved to the same corner (velocityrange.c). 0: no framebuffer, or a screen too wide for the texcoords (the
+// readback's then).
+int Framebuffer_LoadBubbleFrame(Gfx** gfx, s32 x, s32 y, s32* s, s32* t) {
+    if (port_getTransitionGpuFbId() < 0) {
+        return 0;
+    }
+    f32 aspect = GameEngine_GetAspectRatio();
+    f32 k = aspect > 0.0f ? (4.0f / 3.0f) / aspect : 1.0f;
+    s32 w = ((s32)((f32)gFramebufferWidth / k + 0.5f) + 2) & ~3; // (whole 16-bit tile lines)
+    if (w < gFramebufferWidth || w > 480) { // (texel 480 + 32: the most an s16 texcoord in 10.5 * 2 holds)
+        return 0;
+    }
+    s_bubbleCopyTicks = 2; // (the next tick's frame too: the bubble's last one is drawn with it)
+    gDPLoadMultiTile((*gfx)++, sTransitionFbDummy, 0x0080, 1, G_IM_FMT_RGBA, G_IM_SIZ_16b, w,
+                     DEFAULT_FRAMEBUFFER_HEIGHT, 0, 0, w - 1, DEFAULT_FRAMEBUFFER_HEIGHT - 1, 0,
+                     G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
+                     G_TX_NOLOD);
+    *s = (s32)((0.5f + ((f32)x / (f32)gFramebufferWidth - 0.5f) * k) * (f32)w + 0.5f);
+    *t = (s32)(((f32)y / (f32)gFramebufferHeight) * DEFAULT_FRAMEBUFFER_HEIGHT + 0.5f);
+    return 1;
+}
+
+// The frame wanted for a bubble: not while the falling jiggy pieces hold their own picture there.
+int Framebuffer_ConsumeBubbleCopy(void) {
+    if (s_bubbleCopyTicks <= 0) {
+        return 0;
+    }
+    s_bubbleCopyTicks--;
+    return !gctransition_xboxFallingPieces();
+}
+#endif
 
 static void setTransitionVertexTexcoord(Vtx* v) {
     // The transition FB captures the scene with AdjXForAspectRatio applied

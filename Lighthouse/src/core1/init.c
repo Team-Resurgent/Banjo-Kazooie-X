@@ -6,6 +6,9 @@
 #include "port/ShipUtils.h" // gPortResetPending
 #include "version.h"
 #include "core2/gc/transition.h"
+#ifdef LUS_XBOX
+#include "port/Patches/Patches.h" // port_xboxCost
+#endif
 
 #define MAIN_THREAD_STACK_SIZE 0x1800
 
@@ -229,9 +232,21 @@ void mainLoop(void) {
             func_80255524();
             func_80255ACC();
             spawnQueue_func_802C3A18();
+#ifdef LUS_XBOX
+            {
+                // Banjo-Kazooie-X: the game's logic, timed for the log's tick line (FramePacing.cpp)
+                unsigned long long xbStart = __builtin_ia32_rdtsc();
+                s32 xbUpdated = game_update();
+                port_xboxCost(0, __builtin_ia32_rdtsc() - xbStart);
+                if (xbUpdated) {
+                    game_draw(FALSE);
+                }
+            }
+#else
             if (game_update()) {
                 game_draw(FALSE);
             }
+#endif
             spawnQueue_flush();
             break;
     }

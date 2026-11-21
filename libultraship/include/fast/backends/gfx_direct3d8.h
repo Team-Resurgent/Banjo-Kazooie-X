@@ -91,6 +91,7 @@ class GfxRenderingAPID3D8 final : public GfxRenderingAPI {
     GetPixelDepth(int fb_id, const std::set<std::pair<float, float>>& coordinates) override;
     void* GetFramebufferTextureId(int fbId) override;
     void SelectTextureFb(int fbId) override;
+    void SelectTextureFbAt(int slot, int fbId) override;
     void DeleteTexture(uint32_t texId) override;
     void SetTextureFilter(FilteringMode mode) override;
     FilteringMode GetTextureFilter() override;
@@ -250,6 +251,8 @@ class GfxRenderingAPID3D8 final : public GfxRenderingAPI {
     std::vector<Texture> mTextures;
     std::vector<uint32_t> mFreeTextures;
     std::vector<Framebuffer> mFramebuffers;
+    // the screen's own depth buffer (Init): what the screen is drawn with again after a framebuffer with one of its own
+    D3DSurface* mScreenDepth = nullptr;
     struct Retired {
         D3DTexture* tex;
         uint32_t fence;
