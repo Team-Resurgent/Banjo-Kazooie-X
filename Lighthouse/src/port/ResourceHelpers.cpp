@@ -301,12 +301,19 @@ void ResourceHelpers_BuildOverlayRepoints() {
     }
 }
 
+#ifdef LUS_XBOX
+// xbox/src/port/lhx_hdprefetch.cpp: an asset's HD textures read before the renderer draws them
+void HdPrefetch_Asset(const std::string& assetPath);
+void HdPrefetch_Finish(void);
+#endif
+
 static char* LoadAndRetainResource(const std::string& path, uint32_t assetId) {
     auto res = GetResourceByName(path.c_str());
     if (res && res->GetRawPointer() != nullptr) {
         sResourceRefCache[assetId] = res;
 #ifdef LUS_XBOX
         sAssetByPointer[res->GetRawPointer()] = assetId;
+        HdPrefetch_Asset(path);
 #endif
         return reinterpret_cast<char*>(res->GetRawPointer());
     }
@@ -482,6 +489,8 @@ extern "C" void ResourceMgr_XboxReleaseAsset(const void* asset) {
 // textures being keyed by address, where the next asset may be loaded.
 extern "C" void ResourceMgr_XboxFreeUnused(void) {
     ASSET_LOCK;
+    // the HD textures still to be read: the new map's all in before it's drawn, the last map's not after it's gone
+    HdPrefetch_Finish();
     auto resources = Ship::Context::GetRawInstance()->GetResourceManager();
     size_t freed = 0, freedBytes = 0, kept = 0, keptBytes = 0, cacheLines = 0;
 
@@ -503,8 +512,11 @@ extern "C" void ResourceMgr_XboxFreeUnused(void) {
         std::string assetPath = ResourceHelpers_GetActiveAssetPath(id);
         std::replace(assetPath.begin(), assetPath.end(), '\\', '/');
         if (!assetPath.empty()) {
-            cacheLines += resources->UnloadCachedUnder({ assetPath + "_" }, {});
+            // (and a texture pack's HD copies of its parts, cached under alt/: a whole-game pack's level textures
+            // stayed loaded level after level otherwise)
+            cacheLines += resources->UnloadCachedUnder({ assetPath + "_", "alt/" + assetPath + "_" }, {});
             resources->UnloadResource(assetPath);
+            resources->UnloadResource("alt/" + assetPath);
         }
         freed++;
         freedBytes += bytes;
@@ -516,6 +528,19 @@ extern "C" void ResourceMgr_XboxFreeUnused(void) {
     SPDLOG_INFO("lus-x: map change: {} assets nothing held unloaded ({} KB, {} parts of them), {} kept ({} KB); {} "
                 "resources cached",
                 freed, freedBytes >> 10, cacheLines, kept, keptBytes >> 10, resources->CachedResourceCount());
+}
+
+// HD textures turned on in the game (FramePacing.cpp SyncAltAssets): the HD textures of the assets loaded now read
+// ahead, as a map's are when it loads
+extern "C" void ResourceMgr_XboxReadAheadHeld(void) {
+    ASSET_LOCK;
+    for (const auto& [id, res] : sResourceRefCache) {
+        std::string path = ResourceHelpers_GetActiveAssetPath(id);
+        std::replace(path.begin(), path.end(), '\\', '/');
+        if (!path.empty()) {
+            HdPrefetch_Asset(path);
+        }
+    }
 }
 
 // the renderer's thread, before it records a list: true once after a sweep unloaded anything

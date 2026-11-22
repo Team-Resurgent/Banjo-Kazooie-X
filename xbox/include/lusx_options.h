@@ -44,3 +44,21 @@ bool LusxEdit_Available(void);
 // areas scroll; the warp itself, once the menu has closed
 void LusxWarp_Open(const Option** list, int* count, int* cursor, int* pinned);
 void LusxWarp_Run(void);
+
+#ifdef __cplusplus
+#include <string>
+#include <vector>
+
+// the Mods page: the archives in mods/ beside default.xbe, as this run's start found them (xbox/src/port/lhx_nomods.cpp,
+// after Mario-Kart-64XX's), each on or off, in their order: the top one wins where two change the same thing. The ones
+// turned on (each is off until it is) and the order are kept in the config, and read only at the start
+struct LusxMod {
+    std::string file; // its name in the mods folder
+    bool on;          // as the config had it at the start: loaded, or not
+    int start;        // its place at the start
+};
+const std::vector<LusxMod>& LusxMods_List(void); // in the order as set now
+bool LusxMods_IsOff(const std::string& file);    // in the config, now
+void LusxMods_SetOff(const std::string& file, bool off);
+void LusxMods_Move(int index, int by); // up (by < 0) or down the list, and the config
+#endif

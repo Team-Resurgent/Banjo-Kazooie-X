@@ -12,6 +12,7 @@
 #include <memory>
 #include <stdio.h>
 #include <string>
+#include <vector>
 
 #include <SDL2/SDL.h>
 #include <spdlog/spdlog.h>
@@ -48,10 +49,14 @@
 #define ROWS_Y 208.0f
 #define ROW_STEP 58.0f
 #define ROW_HALF 24.0f
+#define MAIN_STEP 52.0f // the main page's, a little closer: its eight rows clear of the footer
 #define LIST_Y 192.0f
 #define LIST_STEP 46.0f
 #define LIST_HALF 20.0f
 #define LIST_ROWS 9 // of the controls page, on screen at once
+#define MOD_ROWS 7  // of the Mods page, with the chosen mod's two lines under them
+#define MOD_INFO_Y 548.0f
+#define MOD_INFO_STEP 34.0f
 #define ROW_X0 186.0f
 #define ROW_X1 774.0f
 #define LABEL_X 214.0f
@@ -85,6 +90,7 @@
 #define C_BADGE_A 0xFF3DB24Au
 #define C_BADGE_B 0xFFD8443Cu
 #define C_BADGE_X 0xFF3C78D8u
+#define C_BADGE_Y 0xFFD8A82Cu
 
 #define REPEAT_AFTER 24 // frames a direction is held before it repeats
 #define REPEAT_EVERY 6
@@ -93,9 +99,9 @@
 
 static const unsigned kMenuLeft = LUSX_PAD_LEFT | LUSX_PAD_L_LEFT, kMenuRight = LUSX_PAD_RIGHT | LUSX_PAD_L_RIGHT;
 
-enum Page { PAGE_MAIN, PAGE_CONTROLS, PAGE_CAPTURE, PAGE_GROUPS, PAGE_LIST, PAGE_DEBUG, PAGE_CONFIRM };
+enum Page { PAGE_MAIN, PAGE_CONTROLS, PAGE_CAPTURE, PAGE_GROUPS, PAGE_LIST, PAGE_DEBUG, PAGE_MODS, PAGE_CONFIRM };
 
-enum MainRow { ROW_RESUME, ROW_CONTROLS, ROW_CHEATS, ROW_OPTIONS, ROW_DEBUG, ROW_RESTART, ROW_EXIT, ROW_COUNT };
+enum MainRow { ROW_RESUME, ROW_CONTROLS, ROW_CHEATS, ROW_OPTIONS, ROW_MODS, ROW_DEBUG, ROW_RESTART, ROW_EXIT, ROW_COUNT };
 
 // the Debug page: the switches always shown first, then the tools Debug mode shows (Warp and Edit save), then Back
 enum DebugRow {
@@ -334,6 +340,9 @@ static const Option kDisplay[] = {
     // the frames between the game's ticks, blended on the GPU (Interpolation/FramePacing.cpp); off, the game's own rate
     OPT_SWITCH_ON("60 fps", "gLusx.Fps60"),
     OPT_VALUES("Draw distance", "gEnhancements.Graphics.DrawDistance", 1, kDrawDistanceNames, kDrawDistanceValues),
+    // a texture pack's art in place of the game's (mods/ beside default.xbe: tools/hd_pack.py), as the PC's Tab
+    // key toggles it: Lighthouse's alternate assets, applied as the frame ends (FramePacing.cpp SyncAltAssets)
+    OPT_SWITCH("HD textures", "gSettings.Mods.AlternateAssets"), // (off by default, as Engine.cpp reads it)
     OPT_SWITCH("Disable level of detail", "gEnhancements.Graphics.DisableLOD"),
     OPT_SWITCH("Original aspect ratio in cutscenes", "gEnhancements.Graphics.CutsceneAspect"),
     OPT_VOLUME("Master volume", "gSettings.Volume.Master", 4),
@@ -369,6 +378,7 @@ static int sCursor, sTop;        // the chosen row; the controls page's first on
 static int sMainCursor;          // what the main page goes back to
 static bool sAdd;                // the input being asked for goes on beside the ones there
 static int sConfirmRow;          // the main page's row being confirmed
+static bool sConfirmFromMods;    // the restart was asked for on the Mods page, which No goes back to
 static int sHeldFor;             // frames a direction has been held
 static unsigned sHeld;           // last frame's buttons
 static unsigned sPressed;        // every button pressed since the menu opened
@@ -731,6 +741,87 @@ static void UpdateDebug(unsigned pressed, int step) {
     }
 }
 
+// The Mods page: the archives in mods/ beside default.xbe, as this run's start found them (port/lhx_nomods.cpp), each
+// on or off, in their order (X and Y move one up and down: the top one wins where two change the same thing). They're
+// only read at the start, so a change waits for a restart, and a "Restart to apply" row is there while one does. (As
+// Mario-Kart-64XX's, with the order.)
+static bool ModMoved(int i) {
+    return LusxMods_List()[i].start != i;
+}
+
+static bool ModsChanged(void) {
+    const std::vector<LusxMod>& mods = LusxMods_List();
+    for (int i = 0; i < (int)mods.size(); i++) {
+        if (LusxMods_IsOff(mods[i].file) == mods[i].on || ModMoved(i)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// its rows: the mods, Restart to apply while there's a change, then Back
+static int ModCount(void) {
+    return (int)LusxMods_List().size();
+}
+static int ModRestartRow(void) {
+    return ModsChanged() ? ModCount() : -1;
+}
+static int ModRows(void) {
+    return ModCount() + (ModsChanged() ? 1 : 0) + 1;
+}
+
+static void GoMods(int cursor) {
+    sPage = PAGE_MODS;
+    sCursor = cursor;
+    sTop = sCursor >= MOD_ROWS ? sCursor - MOD_ROWS + 1 : 0;
+}
+
+static void UpdateMods(unsigned pressed, int step) {
+    const int rows = ModRows();
+
+    sCursor = (sCursor + step + rows) % rows;
+    sTop = sCursor < sTop ? sCursor : sCursor >= sTop + MOD_ROWS ? sCursor - MOD_ROWS + 1 : sTop;
+    if (pressed & LUSX_PAD_B) {
+        GoMain();
+    } else if (sCursor < ModCount()) {
+        if (pressed & (LUSX_PAD_A | kMenuLeft | kMenuRight)) {
+            const LusxMod& mod = LusxMods_List()[sCursor];
+            const bool off = !LusxMods_IsOff(mod.file);
+            char mark[96];
+
+            LusxMods_SetOff(mod.file, off);
+            sChanged = true;
+            snprintf(mark, sizeof(mark), "mods: %s %s", mod.file.c_str(), off ? "off" : "on");
+            LusxDebug_Mark(mark);
+        } else if (pressed & (LUSX_PAD_X | LUSX_PAD_Y)) {
+            // up or down, the cursor with it
+            const int by = (pressed & LUSX_PAD_X) ? -1 : 1;
+            if (sCursor + by >= 0 && sCursor + by < ModCount()) {
+                char mark[96];
+
+                snprintf(mark, sizeof(mark), "mods: %s %s", LusxMods_List()[sCursor].file.c_str(), by < 0 ? "up" : "down");
+                LusxMods_Move(sCursor, by);
+                sCursor += by;
+                sChanged = true;
+                LusxDebug_Mark(mark);
+                sTop = sCursor < sTop ? sCursor : sCursor >= sTop + MOD_ROWS ? sCursor - MOD_ROWS + 1 : sTop;
+            }
+        }
+        // the Restart row comes and goes after the mods (the cursor stays on a mod): no gap left at the end
+        const int lastTop = ModRows() > MOD_ROWS ? ModRows() - MOD_ROWS : 0;
+        sTop = sTop > lastTop ? lastTop : sTop;
+    } else if (pressed & LUSX_PAD_A) {
+        if (sCursor == ModRestartRow()) {
+            sPage = PAGE_CONFIRM;
+            sConfirmRow = ROW_RESTART;
+            sConfirmFromMods = true;
+            sCursor = 0; // No: the safe answer first
+        } else {
+            GoMain();
+        }
+    }
+}
+
 static void UpdateMain(unsigned pressed, int step) {
     sCursor = (sCursor + step + ROW_COUNT) % ROW_COUNT;
     if (pressed & LUSX_PAD_B) {
@@ -755,6 +846,9 @@ static void UpdateMain(unsigned pressed, int step) {
         case ROW_OPTIONS:
             OpenGroups(kOptionGroups, ARRAY_LEN(kOptionGroups), "Options");
             break;
+        case ROW_MODS:
+            GoMods(0);
+            break;
         case ROW_DEBUG:
             sDebugCursor = !ShowDebugRows() ? DEBUG_MODE : DEBUG_WARP;
             GoDebug();
@@ -762,6 +856,7 @@ static void UpdateMain(unsigned pressed, int step) {
         default:
             sPage = PAGE_CONFIRM;
             sConfirmRow = sCursor;
+            sConfirmFromMods = false;
             sCursor = 0; // No: the safe answer first
             break;
     }
@@ -874,13 +969,15 @@ static void UpdateCapture(unsigned pressed) {
 
 static void UpdateConfirm(unsigned pressed, int step) {
     sCursor = (sCursor + step + 2) % 2;
-    if (pressed & LUSX_PAD_B) {
-        GoMain();
-    } else if (pressed & LUSX_PAD_A) {
-        if (sCursor == 0) {
+    if ((pressed & LUSX_PAD_B) || ((pressed & LUSX_PAD_A) && sCursor == 0)) {
+        if (sConfirmFromMods) {
+            GoMods(ModRestartRow() >= 0 ? ModRestartRow() : 0);
+        } else {
             GoMain();
-        } else if (sConfirmRow == ROW_RESTART) {
-            Leave("D:\\default.xbe", "menu: restart");
+        }
+    } else if (pressed & LUSX_PAD_A) {
+        if (sConfirmRow == ROW_RESTART) {
+            Leave("D:\\default.xbe", sConfirmFromMods ? "menu: restart (mods)" : "menu: restart");
         } else {
             Leave(NULL, "menu: to the dashboard");
         }
@@ -931,6 +1028,9 @@ extern "C" int LusxMenu_Update(void) {
             break;
         case PAGE_DEBUG:
             UpdateDebug(pressed, step);
+            break;
+        case PAGE_MODS:
+            UpdateMods(pressed, step);
             break;
         case PAGE_CONFIRM:
             UpdateConfirm(pressed, step);
@@ -1026,6 +1126,17 @@ static void FooterChange(const char* what = "Change", const char* a = NULL, cons
     Hint(x, "B", C_BADGE_B, "Back");
 }
 
+// on a mod of the Mods page's: A on or off, X and Y up and down, B
+static void FooterMods(void) {
+    static const float kGap = 30.0f;
+    float x = CENTRE_X - (HintWidth("On / off") + HintWidth("Up") + HintWidth("Down") + HintWidth("Back") + kGap * 3.0f) * 0.5f;
+
+    x += Hint(x, "A", C_BADGE_A, "On / off") + kGap;
+    x += Hint(x, "X", C_BADGE_X, "Up") + kGap;
+    x += Hint(x, "Y", C_BADGE_Y, "Down") + kGap;
+    Hint(x, "B", C_BADGE_B, "Back");
+}
+
 static void Footer(const char* a, const char* x, const char* b) {
     static const float kGap = 34.0f;
     // measured first, to centre them
@@ -1054,12 +1165,12 @@ static void Panel(const char* title) {
 }
 
 static void DrawMain(void) {
-    static const char* const kRows[ROW_COUNT] = { "Back to the game", "Controls",     "Cheats",           "Options",
-                                                  "Debug",            "Restart game", "Exit to dashboard" };
+    static const char* const kRows[ROW_COUNT] = { "Back to the game", "Controls", "Cheats",       "Options",
+                                                  "Mods",             "Debug",    "Restart game", "Exit to dashboard" };
 
     Panel("Banjo-Kazooie-X");
     for (int i = 0; i < ROW_COUNT; i++) {
-        Row(ROWS_Y + i * ROW_STEP, ROW_HALF, kRows[i], sCursor == i);
+        Row(ROWS_Y + i * MAIN_STEP, ROW_HALF, kRows[i], sCursor == i);
     }
     Footer("Select", NULL, "Back");
 }
@@ -1200,6 +1311,82 @@ static void DrawControls(void) {
     }
 }
 
+// a line of the Mods page's under its rows, cut off at the rows' edges
+static void ModInfo(int line, const std::string& s, uint32_t colour) {
+    Ovl_Clip(ROW_X0, ROW_X1);
+    Text(OVL_FONT_SMALL, CENTRE_X, MOD_INFO_Y + line * MOD_INFO_STEP, s.c_str(), colour, OVL_ALIGN_CENTRE);
+    Ovl_ClipOff();
+}
+
+static void DrawMods(void) {
+    const std::vector<LusxMod>& mods = LusxMods_List();
+    const int count = ModCount(), rows = ModRows(), restart = ModRestartRow();
+
+    Panel("Mods");
+    if (count == 0) {
+        Text(OVL_FONT_BODY, CENTRE_X, LIST_Y, "No mods found.", C_LABEL, OVL_ALIGN_CENTRE);
+        Text(OVL_FONT_SMALL, CENTRE_X, LIST_Y + LIST_STEP, "Put .o2r or .zip mods in the mods folder", C_HINT,
+             OVL_ALIGN_CENTRE);
+        Text(OVL_FONT_SMALL, CENTRE_X, LIST_Y + LIST_STEP * 1.7f, "beside default.xbe, then restart the game.", C_HINT,
+             OVL_ALIGN_CENTRE);
+        Row(LIST_Y + LIST_STEP * 3.0f, LIST_HALF, "Back", true);
+        Footer("Select", NULL, "Back");
+        return;
+    }
+    for (int i = 0; i < MOD_ROWS && sTop + i < rows; i++) {
+        const int row = sTop + i;
+        const float y = LIST_Y + i * LIST_STEP;
+        const bool chosen = row == sCursor;
+
+        if (row < count) {
+            // its place, and its file's name as it is in the mods folder
+            const LusxMod& mod = mods[row];
+            const size_t dot = mod.file.find_last_of('.');
+            const std::string label = std::to_string(row + 1) + ". " +
+                                      (dot != std::string::npos && dot > 0 ? mod.file.substr(0, dot) : mod.file);
+            ValueRow(y, LIST_HALF, label.c_str(), LusxMods_IsOff(mod.file) ? "Off" : "On", chosen, true);
+        } else if (row == restart) {
+            Row(y, LIST_HALF, "Restart to apply", chosen);
+        } else {
+            Row(y, LIST_HALF, "Back", chosen);
+        }
+    }
+    // more above or below
+    if (sTop > 0) {
+        Ovl_Tri(CENTRE_X - 12.0f, 168.0f, CENTRE_X, 158.0f, CENTRE_X + 12.0f, 168.0f, C_GOLD_TOP);
+    }
+    if (sTop + MOD_ROWS < rows) {
+        const float y = LIST_Y + MOD_ROWS * LIST_STEP - 20.0f;
+        Ovl_Tri(CENTRE_X - 12.0f, y, CENTRE_X + 12.0f, y, CENTRE_X, y + 10.0f, C_GOLD_TOP);
+    }
+
+    // the chosen one: its file, and what's become of it
+    if (sCursor < count) {
+        const LusxMod& mod = mods[sCursor];
+        const bool off = LusxMods_IsOff(mod.file);
+
+        ModInfo(0, mod.file, C_VALUE);
+        if (off != !mod.on) {
+            ModInfo(1, off ? "Turned off: restart to apply" : "Turned on: restart to apply", C_CHOSEN_VALUE);
+        } else if (ModMoved(sCursor)) {
+            ModInfo(1, "Moved: restart to apply", C_CHOSEN_VALUE);
+        } else if (off) {
+            ModInfo(1, "Off: not loaded", C_HINT);
+        } else if (!CVarGetInteger("gSettings.Mods.AlternateAssets", 0)) {
+            // (a texture pack's textures are Lighthouse's alternate assets)
+            ModInfo(1, "Loaded, but HD textures are off (Options, Display)", C_CHOSEN_VALUE);
+        } else {
+            ModInfo(1, "Loaded: wins over the ones below it", C_HINT);
+        }
+        FooterMods();
+    } else {
+        if (sCursor == restart) {
+            ModInfo(0, "Starts the game again with the mods as set here.", C_HINT);
+        }
+        Footer("Select", NULL, "Back");
+    }
+}
+
 static void DrawConfirm(void) {
     const bool restart = sConfirmRow == ROW_RESTART;
 
@@ -1266,6 +1453,9 @@ void LusxMenu_Draw(Fast::GfxRenderingAPI* rapi) {
             break;
         case PAGE_DEBUG:
             DrawDebug();
+            break;
+        case PAGE_MODS:
+            DrawMods();
             break;
         case PAGE_CONFIRM:
             DrawConfirm();

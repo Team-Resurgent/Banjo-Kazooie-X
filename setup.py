@@ -4,8 +4,10 @@
     python setup.py                 # everything -> out/Release/XISO/Banjo-Kazooie-X.iso
     python setup.py --check         # say what is there and what is missing
     python setup.py --skip-build    # everything but compiling the game (the archives, the tools)
+    python setup.py --hd-packs      # and the HD texture packs, downloaded and put on the disc
 
-Needs: Python 3.8+ (standard library only), Git, Visual Studio 2022 or later
+Needs: Python 3.8+ (standard library only; the HD packs need Pillow, which
+setup.py installs with pip when it's missing), Git, Visual Studio 2022 or later
 with "Desktop development with C++" (its CMake builds Torch, the asset
 extractor), the RXDK (it builds the game), an internet connection the first
 time, and your Banjo-Kazooie ROM in this folder as baserom.z64. A .v64 / .n64
@@ -23,9 +25,15 @@ PC but the above is used. In order, into folders .gitignore keeps out:
   4. data/bk.o2r, extracted from the ROM with Lighthouse's asset definitions
      (Lighthouse/assets/yaml), and data/lighthouse.o2r, Lighthouse's own
      files (Lighthouse/port) packed
-  5. the game, built with the RXDK (tools/build.py): out/<config>/XISO/
+  5. the HD texture packs: with --hd-packs, BKHD Loulof and BK Reloaded
+     downloaded (build/downloads/, each checked by SHA-256) and their .o2r
+     put in packs/; every Lighthouse pack in packs/ (those, or any other
+     you put there) made into one the Xbox can hold (tools/hd_pack.py):
+     data/mods/<pack>-xbox.o2r
+  6. the game, built with the RXDK (tools/build.py): out/<config>/XISO/
      Banjo-Kazooie-X.iso and the same files as a folder, out/<config>/Build/
-     Banjo-Kazooie-X/, to copy to an Xbox's hard disk
+     Banjo-Kazooie-X/, to copy to an Xbox's hard disk; data/mods/ goes on it
+     as mods/
 """
 import argparse
 import hashlib
@@ -44,8 +52,8 @@ DATA = os.path.join(ROOT, "data")
 LH = os.path.join(ROOT, "Lighthouse")
 ROM_NAMES = ("baserom.z64", "baserom.v64", "baserom.n64", "bk.z64", "bk.v64", "bk.n64")
 ROM = os.path.join(BUILD, "rom", "baserom.z64")
-# USA (Rev0): what the port is made with (Lighthouse's own build is VERSION_US)
-TESTED_SHA1 = "1fe1632098865f639e22c11b9a81ee8f29c75d7a"
+# USA (Rev1): the one the port has been played and tested with on the Xbox
+TESTED_SHA1 = "ded6ee166e740ad1bc810fd678a84b48e245ab80"
 
 # Torch, at the commit Lighthouse has as its submodule
 TORCH_URL = "https://github.com/HarbourMasters/Torch.git"
@@ -55,6 +63,35 @@ TORCH_SRC = os.path.join(BUILD, "upstream", "torch")
 TOOLS_BUILD = os.path.join(BUILD, "extract")
 TORCH_EXE = os.path.join(TOOLS_BUILD, "Release", "torch.exe")
 ARCHIVES_STAMP = os.path.join(DATA, "made-from.txt")
+
+# HD texture packs made for Lighthouse on a PC: their sources in packs/ (the ones --hd-packs downloads, and any other
+# Lighthouse pack put there), each made into one the Xbox can hold by tools/hd_pack.py, in data/mods/, and from there
+# on the disc. Each download is checked against the SHA-256 of the file it was made with.
+PACKS_DIR = os.path.join(ROOT, "packs")
+DOWNLOADS = os.path.join(BUILD, "downloads")
+MODS = os.path.join(DATA, "mods")
+PACKS = (
+    {
+        "name": "BKHD Loulof 2.0.0 by Jeod (the whole game)",
+        "page": "https://gamebanana.com/mods/730601",
+        "url": "https://gamebanana.com/dl/1858571",
+        "file": "bkhd-loulof-200.zip",
+        "size": 475517958,
+        "sha256": "02c59712d2f30b75f337faf292c32f32af0f91f98bff4311f4c5d07c6657e5a4",
+        "o2r": "bkhd-loulof-2.0.0.o2r",
+        "notes": "readme.txt",
+    },
+    {
+        "name": "BK Reloaded v0.2.1 by GhostlyDark (the interface)",
+        "page": "https://github.com/GhostlyDark/BK-Reloaded",
+        "url": "https://github.com/GhostlyDark/BK-Reloaded/releases/download/v0.2.1/bk-reloaded-v0.2.1-lh-o2r-hd.7z",
+        "file": "bk-reloaded-v0.2.1-lh-o2r-hd.7z",
+        "size": 16755303,
+        "sha256": "ec1d533bce08b2b59fe71f60ebe6a6aa0782278ee952077c1a2f6f55a42f40af",
+        "o2r": "bk-reloaded-v0.2.1.o2r",
+        "notes": "bk-reloaded-v0.2.1.txt",
+    },
+)
 
 
 def say(msg):
@@ -152,7 +189,7 @@ def rom_ok():
         return None, "%s is not an N64 ROM (its first bytes are none of the three byte orders)" % os.path.basename(src)
     sha = hashlib.sha1(data).hexdigest()
     if sha not in known_roms():
-        return None, ("%s is not a ROM Lighthouse extracts (SHA-1 %s); the USA (Rev0) one is %s"
+        return None, ("%s is not a ROM Lighthouse extracts (SHA-1 %s); the USA (Rev1) one, tested here, is %s"
                       % (os.path.basename(src), sha, TESTED_SHA1))
     have = None
     if os.path.isfile(ROM):
@@ -268,6 +305,10 @@ def check():
     for label, path in (("Torch (built)", TORCH_EXE), ("data/bk.o2r", os.path.join(DATA, "bk.o2r")),
                         ("data/lighthouse.o2r", os.path.join(DATA, "lighthouse.o2r"))):
         say("%s: %s" % (label, "built" if os.path.isfile(path) else "not built yet"))
+    packs = sorted(f for f in (os.listdir(PACKS_DIR) if os.path.isdir(PACKS_DIR) else []) if f.lower().endswith(".o2r"))
+    say("HD packs (packs/): %s" % (", ".join(packs) if packs else "none (--hd-packs downloads them)"))
+    if packs:
+        say("Pillow (for the HD packs): %s" % ("there" if have_pillow() else "missing (the build installs it)"))
     say("everything needed is here" if ok else "something is missing (above)")
     return ok
 
@@ -394,6 +435,128 @@ def step_archives(rom_sha):
         f.write(made_from)
 
 
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def download(url, dst, size, sha256, tries=3):
+    """url to dst, checked: a download cut off or not the file expected is made again, up to `tries` times in all."""
+    import urllib.request
+
+    if os.path.isfile(dst) and os.path.getsize(dst) == size and sha256_of(dst) == sha256:
+        return
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    part = dst + ".part"
+    for attempt in range(1, tries + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Banjo-Kazooie-X setup)"})
+            with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
+                got, shown = 0, -1
+                for block in iter(lambda: r.read(1 << 20), b""):
+                    f.write(block)
+                    got += len(block)
+                    tenth = got * 10 // size if size else 0
+                    if tenth != shown:
+                        shown = tenth
+                        print("setup:   %d of %d MB" % (got >> 20, size >> 20), flush=True)
+            if os.path.getsize(part) == size and sha256_of(part) == sha256:
+                os.replace(part, dst)
+                return
+            say("%s is not the file expected (changed since this build was made?)" % url)
+        except OSError as e:
+            say("the download failed (%s)" % e)
+        if attempt < tries:
+            say("downloading it again (try %d of %d)" % (attempt + 1, tries))
+    if os.path.isfile(part):
+        os.remove(part)
+    die("could not download %s: run setup.py again, or download it yourself and put it in %s" %
+        (url, os.path.relpath(os.path.dirname(dst), ROOT)))
+
+
+def unpack(archive, names, dst):
+    """The files `names` out of a .zip or .7z into dst. A .7z with Windows' own tar (libarchive), or 7-Zip."""
+    if archive.lower().endswith(".zip"):
+        import zipfile
+        with zipfile.ZipFile(archive) as z:
+            for n in names:
+                with z.open(n) as src, open(os.path.join(dst, n), "wb") as out:
+                    shutil.copyfileobj(src, out, 1 << 20)
+        return
+    tar = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "tar.exe")
+    seven = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "7-Zip", "7z.exe")
+    if os.path.isfile(tar) and subprocess.run([tar, "-xf", archive, "-C", dst] + list(names)).returncode == 0:
+        return
+    if os.path.isfile(seven) and subprocess.run([seven, "x", "-y", "-o" + dst, archive] + list(names)).returncode == 0:
+        return
+    die("could not unpack %s: install 7-Zip (https://www.7-zip.org/) and run setup.py again" % archive)
+
+
+def step_download_packs():
+    """--hd-packs: each pack downloaded (build/downloads/) and its .o2r taken out into packs/."""
+    os.makedirs(PACKS_DIR, exist_ok=True)
+    for p in PACKS:
+        o2r = os.path.join(PACKS_DIR, p["o2r"])
+        if os.path.isfile(o2r):
+            say("HD pack: %s: in packs/" % p["name"])
+            continue
+        say("HD pack: downloading %s (%d MB) from %s" % (p["name"], p["size"] >> 20, p["page"]))
+        archive = os.path.join(DOWNLOADS, p["file"])
+        download(p["url"], archive, p["size"], p["sha256"])
+        unpack(archive, [p["o2r"], p["notes"]], PACKS_DIR)
+        # its notes beside it, named as it is: hd_pack.py puts them in the Xbox pack (the authors' credits)
+        notes = os.path.join(PACKS_DIR, p["notes"])
+        stem = os.path.splitext(p["o2r"])[0]
+        if os.path.isfile(notes) and p["notes"] != stem + ".txt":
+            os.replace(notes, os.path.join(PACKS_DIR, stem + ".txt"))
+        if not os.path.isfile(o2r):
+            die("%s had no %s" % (p["file"], p["o2r"]))
+
+
+def have_pillow():
+    return subprocess.run([sys.executable, "-c", "import PIL"], capture_output=True).returncode == 0
+
+
+def step_packs():
+    """Each pack in packs/ made for the Xbox into data/mods/ (tools/hd_pack.py), again when it, the game's archive or
+    the converter changed; an Xbox pack whose source has gone is taken off."""
+    sources = sorted(f for f in (os.listdir(PACKS_DIR) if os.path.isdir(PACKS_DIR) else [])
+                     if f.lower().endswith(".o2r"))
+    made = {os.path.splitext(f)[0] + "-xbox.o2r" for f in sources}
+    if os.path.isdir(MODS):
+        for f in os.listdir(MODS):
+            if f.endswith(("-xbox.o2r", "-xbox.made-from")) and f.replace(".made-from", ".o2r") not in made:
+                os.remove(os.path.join(MODS, f))
+    if not sources:
+        return
+    if not have_pillow():
+        say("the HD packs need Pillow: installing it (pip install pillow)")
+        run([sys.executable, "-m", "pip", "install", "pillow"])
+    tool = os.path.join(ROOT, "tools", "hd_pack.py")
+    with open(ARCHIVES_STAMP, encoding="utf-8") as f:
+        base = f.read()
+    for f in sources:
+        src = os.path.join(PACKS_DIR, f)
+        out = os.path.join(MODS, os.path.splitext(f)[0] + "-xbox.o2r")
+        stamp = out[:-len(".o2r")] + ".made-from"
+        made_from = "pack %d %d\ntool %s\n%s" % (os.path.getsize(src), int(os.path.getmtime(src)), sha256_of(tool),
+                                                 base)
+        have = None
+        if os.path.isfile(stamp):
+            with open(stamp, encoding="utf-8") as s:
+                have = s.read()
+        if have == made_from and os.path.isfile(out):
+            say("HD pack: data/mods/%s is up to date" % os.path.basename(out))
+            continue
+        say("HD pack: making %s for the Xbox (a few minutes for a big one)" % f)
+        run([sys.executable, tool, src, "--out", out])
+        with open(stamp, "w", encoding="utf-8") as s:
+            s.write(made_from)
+
+
 def step_build(jobs):
     say("building the game with the RXDK")
     run([sys.executable, os.path.join(ROOT, "tools", "build.py"), "-j", str(jobs)])
@@ -409,6 +572,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--check", action="store_true", help="say what is there and what is missing, and stop")
     ap.add_argument("--skip-build", action="store_true", help="stop before compiling the game")
+    ap.add_argument("--hd-packs", action="store_true",
+                    help="download the HD texture packs (about 490 MB) into packs/ and put them on the disc")
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 4)
     a = ap.parse_args()
     if a.check:
@@ -422,6 +587,9 @@ def main():
     step_fetch()
     step_tools(a.jobs)
     step_archives(rom_sha)
+    if a.hd_packs:
+        step_download_packs()
+    step_packs()
     if a.skip_build:
         say("stopped before the game's build (--skip-build)")
         return

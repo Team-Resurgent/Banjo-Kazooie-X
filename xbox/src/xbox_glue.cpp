@@ -144,6 +144,11 @@ extern "C" void LusXbox_RaiseThisThread(void) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 }
 
+// a thread that works only while the game's wait (port/lhx_hdprefetch.cpp: HD textures read ahead)
+extern "C" void LusXbox_LowerThisThread(void) {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+}
+
 // and its wait between looks at the stream
 extern "C" void LusXbox_Sleep(unsigned ms) {
     Sleep(ms);

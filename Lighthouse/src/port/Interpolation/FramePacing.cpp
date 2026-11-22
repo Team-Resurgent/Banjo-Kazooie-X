@@ -24,6 +24,9 @@
 
 extern "C" bool prevAltAssets;
 extern "C" void port_releaseRcpTask(void);
+#ifdef LUS_XBOX
+extern "C" void ResourceMgr_XboxReadAheadHeld(void);
+#endif
 
 namespace {
 long long sLastSubFrameNs = 0;
@@ -39,11 +42,20 @@ inline long long NsSince(Clock::time_point t0) {
 }
 
 void SyncAltAssets() {
+#ifdef LUS_XBOX
+    bool curAltAssets = CVarGetInteger(CVAR_SETTING("Mods.AlternateAssets"), 0); // (off by default: Engine.cpp)
+#else
     bool curAltAssets = CVarGetInteger(CVAR_SETTING("Mods.AlternateAssets"), 1);
+#endif
     if (prevAltAssets != curAltAssets) {
         prevAltAssets = curAltAssets;
         Ship::Context::GetRawInstance()->GetResourceManager()->SetAltAssetsEnabled(curAltAssets);
         gfx_texture_cache_clear();
+#ifdef LUS_XBOX
+        if (curAltAssets) {
+            ResourceMgr_XboxReadAheadHeld(); // ResourceHelpers.cpp: this map's HD textures, ahead of the renderer
+        }
+#endif
     }
 }
 

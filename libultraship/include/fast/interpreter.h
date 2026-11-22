@@ -593,6 +593,7 @@ class Interpreter {
         uint32_t tileState = UINT32_MAX;
         uint32_t modeH;
         uint8_t baseTile, level, levels;
+        bool fromBase = false; // (LUS_XBOX) an HD texture's: its levels made from it, not the game's tiles
     } mMipChain;
 
     GfxDimensions mGfxCurrentWindowDimensions{}; // gfx_current_window_dimensions;

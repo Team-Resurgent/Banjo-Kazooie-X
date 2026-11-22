@@ -651,6 +651,14 @@ def link(objs):
     archives = sorted(glob.glob(os.path.join(data, "*.o2r")))
     for a in archives:
         shutil.copy(a, stage)
+    # mods for the disc (texture packs made for the Xbox by tools/hd_pack.py): data/mods/*.o2r and *.zip, the player's
+    # own, never committed (data/ is ignored); the game reads mods/ beside default.xbe (lhx_nomods.cpp UpdateModFiles)
+    mods = sorted(m for m in glob.glob(os.path.join(data, "mods", "*"))
+                  if os.path.isfile(m) and m.lower().endswith((".o2r", ".zip")))
+    if mods:
+        os.makedirs(os.path.join(stage, "mods"))
+        for m in mods:
+            shutil.copy(m, os.path.join(stage, "mods"))
     os.makedirs(os.path.join(out, "XISO"), exist_ok=True)
     iso = os.path.join(out, "XISO", TITLE + ".iso")
     r = subprocess.run([os.path.join(RXDK, "tools", "xdvdfs.exe"), "pack", stage, iso], capture_output=True,
@@ -662,6 +670,8 @@ def link(objs):
         rel(xbe), os.path.getsize(xbe) / 1048576.0, rel(iso), os.path.getsize(iso) / 1048576.0,
         ", ".join(os.path.basename(a) for a in archives) or
         "none -- run setup.py: it makes bk.o2r and lighthouse.o2r in data/"))
+    if mods:
+        print("build: mods on the disc: %s" % ", ".join(os.path.basename(m) for m in mods))
     size = subprocess.run([os.path.join(LLVM, "bin", "llvm-size.exe"), "-A", exe], capture_output=True, text=True)
     sys.stdout.write(size.stdout)
 

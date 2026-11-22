@@ -355,7 +355,12 @@ void GameEngine::FinishInit() {
 #endif
 
     RegisterResourceFactories(context->GetResourceManager()->GetResourceLoader());
+#ifdef LUS_XBOX
+    // Banjo-Kazooie-X: off until the player turns them on (Back menu, Options, Display and sound): the game as it was
+    prevAltAssets = CVarGetInteger(CVAR_SETTING("Mods.AlternateAssets"), 0);
+#else
     prevAltAssets = CVarGetInteger(CVAR_SETTING("Mods.AlternateAssets"), 1);
+#endif
     context->GetResourceManager()->SetAltAssetsEnabled(prevAltAssets);
 
     Lighthouse::RescanLanguages();

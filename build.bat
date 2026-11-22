@@ -7,7 +7,8 @@ rem
 rem It finds a Python 3.8 or later and hands over to setup.py, which checks the
 rem ROM, fetches Torch and builds it, extracts the game from the ROM and
 rem builds. Arguments are
-rem passed on: build.bat --check, build.bat --skip-build.
+rem passed on: build.bat --check, build.bat --skip-build, build.bat --hd-packs.
+rem Run with none, it asks whether to download the HD texture packs too.
 setlocal EnableExtensions
 set "BKX_SELF=%~f0"
 if not defined PATH set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem"
@@ -49,7 +50,18 @@ if not defined BKX_PY (
 
 echo  Python: %BKX_PY%
 echo.
-%BKX_PY% setup.py %*
+
+rem the HD texture packs: asked once, on a double-click with none in packs\ yet (setup.py --hd-packs)
+set "BKX_PACKS="
+if "%~1"=="" if not defined BKX_NONINTERACTIVE if not exist "packs\*.o2r" (
+  echo  HD texture packs: BKHD Loulof ^(the whole game^) and BK Reloaded ^(the interface^)
+  echo  can be downloaded ^(about 490 MB^) and put on the disc. The game starts without
+  echo  them: turn them on in the game ^(Back, Mods, and Options, HD textures^).
+  choice /c YN /m " Download them"
+  if not errorlevel 2 set "BKX_PACKS=--hd-packs"
+  echo.
+)
+%BKX_PY% setup.py %BKX_PACKS% %*
 set "BKX_RC=%ERRORLEVEL%"
 if not "%BKX_RC%"=="0" goto :failrc
 echo.

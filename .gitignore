@@ -13,6 +13,11 @@
 # fetched by setup.py (tools/fetch_deps.py)
 /deps/
 
+# HD texture packs (setup.py --hd-packs, or your own): other people's work, never committed
+/packs/
+/*.zip
+/*.7z
+
 # the release's .nfo goes with the release download, not in the repository
 *.nfo
 

@@ -2277,6 +2277,21 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
     UploadBaseTexture(addr, width, height);
 }
 
+#ifdef LUS_XBOX
+// An HD replacement (TEX_FLAG_LOAD_AS_RAW, scaled) loaded whole: from its start, all the bytes the game's own
+// texture has (a load rounds up to 8-byte words). Its size is then its own, not what the tile's TMEM lines make of
+// the bytes: a texture whose rows aren't whole words (a 4-bit menu font glyph 26 texels wide: 13-byte rows on
+// 16-byte lines) came to 13 rows of its 16, and the pause menu's text lost its bottom.
+static bool XboxWholeHdLoad(const uint8_t* addr, uint32_t origBytes, const Fast::Texture* res, float hbs, float vps) {
+    const float scale = hbs * vps;
+    if (res == nullptr || (res->Flags & TEX_FLAG_LOAD_AS_RAW) == 0 || scale <= 1.0f || addr != res->ImageData) {
+        return false;
+    }
+    const uint32_t gameBytes = (uint32_t)(res->ImageDataSize / scale + 0.5f);
+    return origBytes + 8 >= gameBytes;
+}
+#endif
+
 void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
     const RawTexMetadata* metadata = &mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].raw_tex_metadata;
     const uint8_t* addr =
@@ -2306,6 +2321,35 @@ void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
             break;
     }
 
+#ifdef LUS_XBOX
+    // An HD texture can be kept at 16 bits a texel here (Mario-Kart-64XX's tools/hd_pack.py: in 64 MB, a PC pack's
+    // 32 bits are twice what can be held): RGBA16 (5-5-5-1, big-endian, as the N64's) or IA16 (intensity, alpha).
+    // Its bytes are scaled as a 32-bit one's are (HByteScale counts bytes), so the lines are cut out of it as below
+    // and then widened to the 32 bits UploadBaseTexture takes, in place, from the end back.
+    const uint32_t texelBytes =
+        (type == Fast::TextureType::RGBA16bpp || type == Fast::TextureType::GrayscaleAlpha16bpp) ? 2 : 4;
+    auto widen = [&](uint32_t texels) {
+        uint8_t* b = mTexUploadBuffer;
+        if (type == Fast::TextureType::RGBA16bpp) {
+            for (uint32_t i = texels; i-- > 0;) {
+                const uint16_t v = (uint16_t)((b[2 * i] << 8) | b[2 * i + 1]);
+                b[4 * i + 3] = (v & 1) ? 255 : 0;
+                b[4 * i + 2] = SCALE_5_8((v >> 1) & 0x1F);
+                b[4 * i + 1] = SCALE_5_8((v >> 6) & 0x1F);
+                b[4 * i + 0] = SCALE_5_8(v >> 11);
+            }
+        } else if (type == Fast::TextureType::GrayscaleAlpha16bpp) {
+            for (uint32_t i = texels; i-- > 0;) {
+                const uint8_t in = b[2 * i], a = b[2 * i + 1];
+                b[4 * i + 0] = b[4 * i + 1] = b[4 * i + 2] = in;
+                b[4 * i + 3] = a;
+            }
+        }
+    };
+#else
+    const uint32_t texelBytes = 4;
+#endif
+
     uint32_t numLoadedBytes = mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].size_bytes;
     uint32_t numOriginallyLoadedBytes = mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].orig_size_bytes;
 
@@ -2319,8 +2363,25 @@ void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
     uint32_t resultNewLineSize = resultOrigLineSize * metadata->h_byte_scale;
     uint32_t resultNewHeight = resultOrigHeight * metadata->v_pixel_scale;
 
-    if (resultNewLineSize == 4 * width && resultNewHeight == height) {
+#ifdef LUS_XBOX
+    const bool wholeHd = !importReplacement &&
+                         XboxWholeHdLoad(mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].addr,
+                                mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].orig_size_bytes, resource.get(),
+                                         metadata->h_byte_scale, metadata->v_pixel_scale);
+#else
+    const bool wholeHd = false;
+#endif
+    if ((resultNewLineSize == texelBytes * width && resultNewHeight == height) || wholeHd) {
         // Can use the texture directly since it has the correct dimensions
+#ifdef LUS_XBOX
+        if (texelBytes == 2) {
+            const uint32_t texels = std::min<uint32_t>((uint32_t)width * height, resource->ImageDataSize / 2);
+            memcpy(mTexUploadBuffer, addr, texels * 2);
+            widen(texels);
+            UploadBaseTexture(mTexUploadBuffer, width, texels / std::max<uint32_t>(width, 1));
+            return;
+        }
+#endif
         UploadBaseTexture(addr, width, height);
         return;
     }
@@ -2355,20 +2416,27 @@ void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
     }
 
     // Describe the buffer by what was actually packed (the loaded HD stride)
-    uint32_t uploadWidth = safeLineSizeBytes / 4;
+    uint32_t uploadWidth = safeLineSizeBytes / texelBytes;
     uint32_t uploadHeight = safeLineSizeBytes > 0 ? safeLoadedBytes / safeLineSizeBytes : 0;
     const bool singleLineLoad = uploadHeight <= 1 && resultNewLineSize != 0 && resultNewLineSize < safeLineSizeBytes;
     if (uploadWidth > (uint32_t)mRapi->GetMaxTextureSize() || singleLineLoad) {
-        if (safeLoadedBytes == (uint64_t)width * height * 4) {
+        if (safeLoadedBytes == (uint64_t)width * height * texelBytes) {
             // buffer holds the full image, use its real dimensions
             uploadWidth = width;
             uploadHeight = height;
         } else {
             // partial load, fall back to the tile-derived dimensions
-            uploadWidth = resultNewLineSize / 4;
+            uploadWidth = resultNewLineSize / texelBytes;
             uploadHeight = resultNewHeight;
         }
     }
+#ifdef LUS_XBOX
+    if (texelBytes == 2) {
+        // (what was packed, and no more than the buffer's 32-bit texels)
+        const uint32_t packed = std::max<uint32_t>(safeLoadedBytes, numLoadedBytes) / 2;
+        widen(std::min<uint32_t>(packed, (uint32_t)uploadWidth * uploadHeight));
+    }
+#endif
     UploadBaseTexture(mTexUploadBuffer, uploadWidth, uploadHeight);
 }
 
@@ -2403,9 +2471,20 @@ uint8_t Interpreter::DetectMipChain(uint32_t baseTile) const {
         return 0;
     }
     const RDP::TmemLoadEntry* baseEntry = FindTmemLoad(base.tmem);
+#ifdef LUS_XBOX
+    // An HD texture over a game texture drawn with its chain (Banjo-Kazooie's ground, in a texture pack): the game's
+    // levels are its own art, smaller, so the chain is the HD texture's own, made from it (UploadBaseTexture), its
+    // length the game's (0x80 marks it). With none, the combiner's LOD fraction blended in the game's next tile by
+    // distance: a pack's ground went from HD to the game's art and back as the camera moved.
+    const bool hd = baseEntry != nullptr && baseEntry->replaced;
+    if (baseEntry == nullptr) {
+        return 0;
+    }
+#else
     if (baseEntry == nullptr || baseEntry->replaced) {
         return 0;
     }
+#endif
 
     // Upper tiles' sizes are often stale, so each level is half the one before
     uint8_t levels = 0;
@@ -2434,6 +2513,14 @@ uint8_t Interpreter::DetectMipChain(uint32_t baseTile) const {
         if (!halvedLine && !stripLevel) {
             break;
         }
+#ifdef LUS_XBOX
+        if (hd) {
+            levels++;
+            prevLine = t.line_size_bytes;
+            prevTmem = t.tmem;
+            continue;
+        }
+#endif
         const RDP::TmemLoadEntry* entry = FindTmemLoad(t.tmem);
         if (entry == nullptr || !entry->linear || entry->replaced) {
             break;
@@ -2456,6 +2543,11 @@ uint8_t Interpreter::DetectMipChain(uint32_t baseTile) const {
         prevLine = t.line_size_bytes;
         prevTmem = t.tmem;
     }
+#ifdef LUS_XBOX
+    if (hd && levels > 0) {
+        return (uint8_t)(levels | 0x80);
+    }
+#endif
     return levels;
 }
 
@@ -2617,6 +2709,24 @@ static void ResampleRgba32(const uint8_t* src, uint32_t sw, uint32_t sh, uint8_t
 void Interpreter::UploadBaseTexture(const uint8_t* rgba32Buf, uint32_t width, uint32_t height) {
     if (mCurrentMipExtraLevels > 0) {
         mRapi->UploadTextureMip(rgba32Buf, width, height, 0, mCurrentMipExtraLevels + 1u);
+#ifdef LUS_XBOX
+        if (mMipChain.fromBase) {
+            // an HD texture's chain, each level half the one before (DetectMipChain)
+            const uint8_t* prev = rgba32Buf;
+            uint32_t w = width, h = height;
+            for (uint32_t l = 1; l <= mCurrentMipExtraLevels; l++) {
+                const uint32_t lw = std::max(w >> 1, 1u), lh = std::max(h >> 1, 1u);
+                std::vector<uint8_t>& level = (l & 1) ? mMipLevelBuffer : mMipDecodeBuffer;
+                level.resize((size_t)lw * lh * 4);
+                ResampleRgba32(prev, w, h, level.data(), lw, lh);
+                mRapi->UploadTextureMip(level.data(), lw, lh, l, mCurrentMipExtraLevels + 1u);
+                prev = level.data();
+                w = lw;
+                h = lh;
+            }
+            return;
+        }
+#endif
         UploadMipChain(mImportTile, width, height);
         return;
     }
@@ -3902,6 +4012,10 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
         mMipChain.baseTile != mRdp->first_tile_index || mMipChain.level != mRsp->texture_level) {
         mMipChain = { mTileState, mipModeH, mRdp->first_tile_index, mRsp->texture_level,
                       DetectMipChain(mRdp->first_tile_index) };
+#ifdef LUS_XBOX
+        mMipChain.fromBase = (mMipChain.levels & 0x80) != 0;
+        mMipChain.levels &= 0x7F;
+#endif
     }
     const uint8_t mipExtraLevels = mMipChain.levels;
     if (mipExtraLevels > 0) {
@@ -4043,6 +4157,16 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
                 tex_width[i] = (uint32_t)lroundf(tex_width[i] / hbs);
                 tex_height[i] = (uint32_t)lroundf(tex_height[i] / vps);
             }
+#ifdef LUS_XBOX
+            // (an HD replacement loaded whole: its own size, in the game's texels, as it went up)
+            if (XboxWholeHdLoad(mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].addr,
+                                mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].orig_size_bytes,
+                                triMeta.resource.get(), triMeta.h_byte_scale, triMeta.v_pixel_scale)) {
+                const float texelScale = triMeta.v_pixel_scale > 0.0f ? triMeta.v_pixel_scale : 1.0f;
+                tex_width[i] = (uint32_t)lroundf(triMeta.resource->Width / texelScale);
+                tex_height[i] = (uint32_t)lroundf(triMeta.resource->Height / texelScale);
+            }
+#endif
             bool pyrLike = IsPyramidLike(tex_width[i], tex_height[i], tex_width2[i], tex_height2[i], 1.0f, 1.0f);
             // Same wrap-period trim as the import paths. The >= tex_width2 guard skips a stale
             // mask left by an FB blit (the pause background), which would otherwise tile the FB.
