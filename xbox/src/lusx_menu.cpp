@@ -216,9 +216,9 @@ static const Option kCheatTransform[] = {
 // menu (UI/LighthouseMenuDevTools.cpp) and nothing in the game reads it. Logged as the cheats are.
 static const Option kDebugMode = OPT_SWITCH("Debug mode", "gLusx.DebugMode");
 
-// on the Debug page, whatever Debug mode is: lusx_log.h. On on a fresh install while the port is new (the other ports': off), so a test run's
-// log and crash report are there from its first start.
-static const Option kLogging = { OPT_ON_OFF, "Logging", "gLusx.Logging", 1, NULL, NULL, 0, -1, LusxLog_Apply };
+// on the Debug page, whatever Debug mode is: lusx_log.h. Off on a fresh install, as the other ports': a tester turns it on
+// (a crash before the config is read is still written: xbox_main.cpp).
+static const Option kLogging = { OPT_ON_OFF, "Logging", "gLusx.Logging", 0, NULL, NULL, 0, -1, LusxLog_Apply };
 
 // the spdlog level that Logging's Off replaces, given back by On
 static spdlog::level::level_enum sLogLevel = spdlog::level::info;
