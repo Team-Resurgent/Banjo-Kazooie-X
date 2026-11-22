@@ -1026,7 +1026,11 @@ void GfxRenderingAPID3D8::ApplyDrawState(bool hw, int cull, const HwLights* ligh
     // a texture edge is cut, not blended (the PC shaders make its alpha 1): blended, its filtered edge mixed with what
     // was behind it so far, the sky, and wrote depth, so the wall drawn after left a sky-coloured outline
     RS(D3DRS_ALPHABLENDENABLE, mBoundBlend, cc.opt_alpha && !cc.opt_texture_edge);
-    int ref = cc.opt_texture_edge ? 48 : cc.opt_alpha_threshold ? 8 : -1;
+    // the threshold the game set (G_AC_THRESHOLD: its blend colour's alpha), as the RDP compares: below it a pixel is
+    // dropped, depth and all. A fixed 8 let a glow's soft edge write depth: Freezeezy Peak's tree lights, drawn with
+    // depth and a threshold of 0x80, hid the lights behind them inside each other's halos
+    const int threshold = mReplayDraw != nullptr ? mReplayDraw->alphaRef : mCurrentAlphaRef;
+    int ref = cc.opt_texture_edge ? 48 : cc.opt_alpha_threshold ? threshold : -1;
     // A blended draw with no depth to write: the pixels too faint to change the picture (under one step of a 16-bit
     // screen) needn't read and write the screen. Smoke is mostly these, in big quads near the camera, many deep: a
     // Goron's roll on ice at 720p took a tick from 50 ms to 94 with the CPU idle.
@@ -1156,6 +1160,7 @@ void GfxRenderingAPID3D8::RecordDraw(bool hw, const uint8_t* verts, size_t bytes
     r.zTest = mCurrentDepthTest;
     r.zWrite = mCurrentDepthMask;
     r.decal = mCurrentZmodeDecal;
+    r.alphaRef = mCurrentAlphaRef;
     r.hw = hw;
     r.tris = (uint32_t)tris;
     r.clipStart = r.clipTris = 0;

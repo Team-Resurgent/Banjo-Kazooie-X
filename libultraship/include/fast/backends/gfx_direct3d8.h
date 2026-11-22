@@ -68,6 +68,9 @@ class GfxRenderingAPID3D8 final : public GfxRenderingAPI {
     void SetViewport(int x, int y, int width, int height) override;
     void SetScissor(int x, int y, int width, int height) override;
     void SetUseAlpha(bool useAlpha) override;
+    void SetAlphaThreshold(uint8_t ref) override {
+        mCurrentAlphaRef = ref;
+    }
     void DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) override;
     void Init() override;
     void OnResize() override;
@@ -186,6 +189,7 @@ class GfxRenderingAPID3D8 final : public GfxRenderingAPI {
         Program* prog;
         TexBind tex[2];
         int8_t zTest, zWrite, decal;
+        uint8_t alphaRef; // the alpha compare's threshold (SetAlphaThreshold)
         bool hw;
         bool vb;         // its vertices are in the tick's vertex buffer (mRecVb), not mRecVerts
         uint32_t start;  // its vertices: the bytes into mRecVerts, or the vertex buffer
@@ -251,6 +255,7 @@ class GfxRenderingAPID3D8 final : public GfxRenderingAPI {
     std::vector<Texture> mTextures;
     std::vector<uint32_t> mFreeTextures;
     std::vector<Framebuffer> mFramebuffers;
+    uint8_t mCurrentAlphaRef = 8; // (SetAlphaThreshold)
     // the screen's own depth buffer (Init): what the screen is drawn with again after a framebuffer with one of its own
     D3DSurface* mScreenDepth = nullptr;
     struct Retired {

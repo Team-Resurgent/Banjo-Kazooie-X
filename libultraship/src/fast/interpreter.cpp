@@ -3852,6 +3852,11 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
     bool use_noise = (mRdp->other_mode_l & (3U << G_MDSFT_ALPHACOMPARE)) == G_AC_DITHER;
     bool use_2cyc = (mRdp->other_mode_h & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_2CYCLE;
     bool alpha_threshold = (mRdp->other_mode_l & (3U << G_MDSFT_ALPHACOMPARE)) == G_AC_THRESHOLD;
+#ifdef LUS_XBOX
+    // the RDP's threshold is the blend colour's alpha (8 at least: the fixed one the backend had, for a coverage edge
+    // and a threshold of 0)
+    const uint8_t alphaRef = alpha_threshold && mRdp->blend_color.a > 8 ? mRdp->blend_color.a : 8;
+#endif
     bool invisible =
         (mRdp->other_mode_l & (3 << 24)) == (G_BL_0 << 24) && (mRdp->other_mode_l & (3 << 20)) == (G_BL_CLR_MEM << 20);
     bool use_grayscale = mRdp->grayscale;
@@ -4118,6 +4123,13 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
         mRapi->SetUseAlpha(use_alpha);
         mRenderingState.alpha_blend = use_alpha;
     }
+#ifdef LUS_XBOX
+    if (alphaRef != mRenderingState.alpha_ref) {
+        Flush();
+        mRapi->SetAlphaThreshold(alphaRef);
+        mRenderingState.alpha_ref = alphaRef;
+    }
+#endif
     if (mipExtraLevels > 0) {
         // LOD per framebuffer pixel
         const float lodParams[4] = { (float)tex_width[0], (float)tex_height[0], mRdp->prim_lod_min / 256.0f,
@@ -7311,7 +7323,7 @@ static bool XboxHandlerKeepsTriState(uint8_t opcode) {
            h == gfx_dl_otr_hash_handler_custom || h == gfx_dl_otr_filepath_handler_custom ||
            h == gfx_dl_index_handler || h == gfx_branch_z_otr_handler_f3dex2 || h == gfx_cull_dl_handler_f3dex2 ||
            h == gfx_stubbed_command_handler || h == gfx_noop_handler_f3dex2 || h == gfx_marker_handler_otr ||
-           h == gfx_mtx_handler_f3dex2 || h == gfx_mtx_handler_f3d || h == gfx_mtx_otr_handler_custom ||
+           h == gfx_spnoop_command_handler_f3dex2 || h == gfx_mtx_handler_f3dex2 || h == gfx_mtx_handler_f3d || h == gfx_mtx_otr_handler_custom ||
            h == gfx_mtx_otr_filepath_handler_custom || h == gfx_pop_mtx_handler_f3dex2 ||
            h == gfx_pop_mtx_handler_f3d;
 }
@@ -7328,12 +7340,19 @@ static bool XboxHandlerSaysIfChanged(uint8_t opcode) {
     } else if (ucode_handler_index < ucode_handlers.size() && ucode_handlers[ucode_handler_index]->contains(op)) {
         h = ucode_handlers[ucode_handler_index]->at(op).second;
     }
+    // (and F3DEX's and F3D's own encodings of the same setters, Banjo-Kazooie's: they call the same GfxSp functions.
+    // Left out, every G_SETOTHERMODE_H and G_CLEARGEOMETRYMODE ended the fast path, changed or not: in Click Clock
+    // Wood at 2x draw distance ~640 times a frame, each triangle after one ~7 us on the slow path)
     return h == gfx_set_tile_handler_rdp || h == gfx_set_tile_size_handler_rdp || h == gfx_set_combine_handler_rdp ||
            h == gfx_set_prim_color_handler_rdp || h == gfx_set_env_color_handler_rdp ||
            h == gfx_set_fog_color_handler_rdp || h == gfx_othermode_l_handler_f3dex2 ||
            h == gfx_othermode_h_handler_f3dex2 || h == gfx_rdp_set_other_mode_rdp ||
            h == gfx_geometry_mode_handler_f3dex2 || h == gfx_texture_handler_f3dex2 || h == gfx_load_block_handler_rdp ||
-           h == gfx_load_block_wide_handler_rdp || h == gfx_load_tile_handler_rdp || h == gfx_load_tlut_handler_rdp;
+           h == gfx_load_block_wide_handler_rdp || h == gfx_load_tile_handler_rdp || h == gfx_load_tlut_handler_rdp ||
+           h == gfx_othermode_l_handler_f3d || h == gfx_othermode_h_handler_f3d ||
+           h == gfx_set_geometry_mode_handler_f3dex || h == gfx_clear_geometry_mode_handler_f3dex ||
+           h == gfx_set_geometry_mode_handler_f3d || h == gfx_clear_geometry_mode_handler_f3d ||
+           h == gfx_texture_handler_f3d;
 }
 
 // the same, worked out once a microcode and opcode (~12,000 commands a frame)

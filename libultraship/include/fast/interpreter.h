@@ -391,6 +391,7 @@ struct RenderingState {
     uint8_t depth_test_and_mask; // 1: depth test, 2: depth mask
     bool decal_mode;
     bool alpha_blend;
+    uint8_t alpha_ref = 8; // the alpha compare's threshold given the backend (SetAlphaThreshold)
     struct XYWidthHeight viewport, scissor;
     struct ShaderProgram* mShaderProgram;
     TextureCacheNode* mTextures[SHADER_MAX_TEXTURES];
